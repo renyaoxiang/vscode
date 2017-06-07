@@ -34,7 +34,7 @@ export interface IViewletViewOptions extends IViewOptions {
 }
 
 export interface IViewletView extends IView, IThemable {
-	id?: string;
+	id: string;
 	create(): TPromise<void>;
 	setVisible(visible: boolean): TPromise<void>;
 	getActions(): IAction[];
@@ -54,6 +54,9 @@ export interface IViewletView extends IView, IThemable {
  * The AdaptiveCollapsibleViewletView can grow with the content inside dynamically.
  */
 export abstract class AdaptiveCollapsibleViewletView extends FixedCollapsibleView implements IViewletView {
+
+	readonly id: string;
+
 	protected treeContainer: HTMLElement;
 	protected tree: ITree;
 	protected toDispose: IDisposable[];
@@ -184,6 +187,9 @@ export abstract class AdaptiveCollapsibleViewletView extends FixedCollapsibleVie
 }
 
 export abstract class CollapsibleViewletView extends CollapsibleView implements IViewletView {
+
+	readonly id: string;
+
 	protected treeContainer: HTMLElement;
 	protected tree: ITree;
 	protected toDispose: IDisposable[];
@@ -376,7 +382,7 @@ export class ComposedViewsViewlet extends Viewlet {
 	protected lastFocusedView: IViewletView;
 
 	private splitView: SplitView;
-	private views: IViewletView[];
+	protected views: IViewletView[];
 	private dimension: Dimension;
 	private viewletSettings: any;
 
@@ -398,8 +404,8 @@ export class ComposedViewsViewlet extends Viewlet {
 		this.viewletSettings = this.getMemento(storageService, Scope.WORKSPACE);
 		this.viewsStates = this.loadViewsStates();
 
-		this._register(ViewsRegistry.onViewsRegistered(viewDescriptors => this.createViews(viewDescriptors.filter(viewDescriptor => ViewLocation.Explorer === viewDescriptor.location))));
-		this._register(ViewsRegistry.onViewsDeregistered(viewDescriptors => this.removeViews(viewDescriptors.filter(viewDescriptor => ViewLocation.Explorer === viewDescriptor.location))));
+		this._register(ViewsRegistry.onViewsRegistered(viewDescriptors => this.createViews(viewDescriptors.filter(viewDescriptor => this.location === viewDescriptor.location))));
+		this._register(ViewsRegistry.onViewsDeregistered(viewDescriptors => this.removeViews(viewDescriptors.filter(viewDescriptor => this.location === viewDescriptor.location))));
 	}
 
 	public create(parent: Builder): TPromise<void> {
@@ -409,7 +415,7 @@ export class ComposedViewsViewlet extends Viewlet {
 		this.splitView = this._register(new SplitView(this.viewletContainer));
 		this._register(this.splitView.onFocus((view: IViewletView) => this.lastFocusedView = view));
 
-		const views = ViewsRegistry.getViews(ViewLocation.Explorer);
+		const views = ViewsRegistry.getViews(this.location);
 		return this.createViews(views)
 			.then(() => this.lastFocusedView = this.views[0])
 			.then(() => this.setVisible(this.isVisible()))
@@ -461,7 +467,7 @@ export class ComposedViewsViewlet extends Viewlet {
 			}
 			views.push(view);
 			attachHeaderViewStyler(view, this.themeService);
-			this.splitView.addView(view, viewState ? viewState.size : void 0, index);
+			this.splitView.addView(view, viewState ? Math.max(viewState.size, 1) : viewDescriptor.size, index);
 		}
 
 		return TPromise.join(views.map(view => view.create()))

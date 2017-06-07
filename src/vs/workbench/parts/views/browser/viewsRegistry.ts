@@ -11,6 +11,7 @@ import { ITreeViewDataProvider } from 'vs/workbench/parts/views/common/views';
 export class ViewLocation {
 
 	static readonly Explorer = new ViewLocation('explorer');
+	static readonly Debug = new ViewLocation('debug');
 
 	constructor(private _id: string) {
 	}
@@ -44,6 +45,7 @@ export interface IViewDescriptor {
 
 	readonly order?: number;
 
+	readonly size?: number;
 }
 
 export interface IViewsRegistry {
