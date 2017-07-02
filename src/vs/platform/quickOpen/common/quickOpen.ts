@@ -62,6 +62,11 @@ export interface IPickOptions {
 	 * enables quick navigate in the picker to open an element without typing
 	 */
 	quickNavigateConfiguration?: IQuickNavigateConfiguration;
+
+	/**
+	 * a context key to set when this picker is active
+	 */
+	contextKey?: string;
 }
 
 export interface IInputOptions {
@@ -101,6 +106,7 @@ export interface IInputOptions {
 
 export interface IShowOptions {
 	quickNavigateConfiguration?: IQuickNavigateConfiguration;
+	inputSelection?: { start: number; end: number; };
 }
 
 export const IQuickOpenService = createDecorator<IQuickOpenService>('quickOpenService');

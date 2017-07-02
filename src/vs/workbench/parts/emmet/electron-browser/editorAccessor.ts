@@ -120,7 +120,7 @@ export class EditorAccessor implements emmet.Editor {
 		// find highest placeholder index
 		walk(marker, candidate => {
 			if (candidate instanceof Placeholder) {
-				let index = Number(candidate.index);
+				let index = candidate.index;
 				if (index > maxIndex) {
 					maxIndex = index;
 				}
@@ -132,7 +132,7 @@ export class EditorAccessor implements emmet.Editor {
 		walk(marker, candidate => {
 			if (candidate instanceof Placeholder) {
 				if (candidate.isFinalTabstop) {
-					candidate.index = String(++maxIndex);
+					candidate.index = ++maxIndex;
 				}
 			}
 			return true;
@@ -264,6 +264,19 @@ export class EditorAccessor implements emmet.Editor {
 		syntax = this.checkParentMode(syntax);
 
 		return syntax;
+	}
+
+	public getLanguage() {
+		let position = this._editor.getSelection().getStartPosition();
+		this._editor.getModel().forceTokenization(position.lineNumber);
+		let languageId = this._editor.getModel().getLanguageIdAtPosition(position.lineNumber, position.column);
+		let language = this._languageIdentifierResolver.getLanguageIdentifier(languageId).language;
+		let syntax = language.split('.').pop();
+
+		return {
+			language: syntax,
+			parentMode: this.checkParentMode(syntax)
+		};
 	}
 
 	private getSyntaxProfile(syntax: string): string {

@@ -50,8 +50,11 @@ class SyncedBuffer {
 			}
 		}
 
-		if (workspace.rootPath && this.client.apiVersion.has230Features()) {
-			args.projectRootPath = workspace.rootPath;
+		if (this.client.apiVersion.has230Features()) {
+			const root = this.client.getWorkspaceRootForResource(this.document.uri);
+			if (root) {
+				args.projectRootPath = root;
+			}
 		}
 
 		this.client.execute('open', args, false);
@@ -106,7 +109,7 @@ export default class BufferSyncSupport {
 	private readonly disposables: Disposable[] = [];
 	private readonly syncedBuffers: Map<string, SyncedBuffer>;
 
-	private pendingDiagnostics: { [key: string]: number; };
+	private pendingDiagnostics = new Map<string, number>();
 	private readonly diagnosticDelayer: Delayer<any>;
 	private checkGlobalTSCVersion: boolean;
 
@@ -116,7 +119,6 @@ export default class BufferSyncSupport {
 		this.diagnostics = diagnostics;
 		this._validate = validate;
 
-		this.pendingDiagnostics = Object.create(null);
 		this.diagnosticDelayer = new Delayer<any>(300);
 
 		this.syncedBuffers = new Map<string, SyncedBuffer>();
@@ -211,7 +213,7 @@ export default class BufferSyncSupport {
 			return;
 		}
 		for (const filePath of this.syncedBuffers.keys()) {
-			this.pendingDiagnostics[filePath] = Date.now();
+			this.pendingDiagnostics.set(filePath, Date.now());
 		}
 		this.diagnosticDelayer.trigger(() => {
 			this.sendPendingDiagnostics();
@@ -223,7 +225,7 @@ export default class BufferSyncSupport {
 			return;
 		}
 
-		this.pendingDiagnostics[file] = Date.now();
+		this.pendingDiagnostics.set(file, Date.now());
 		const buffer = this.syncedBuffers.get(file);
 		let delay = 300;
 		if (buffer) {
@@ -239,10 +241,10 @@ export default class BufferSyncSupport {
 		if (!this._validate) {
 			return;
 		}
-		let files = Object.keys(this.pendingDiagnostics).map((key) => {
+		let files = Array.from(this.pendingDiagnostics.entries()).map(([key, value]) => {
 			return {
 				file: key,
-				time: this.pendingDiagnostics[key]
+				time: value
 			};
 		}).sort((a, b) => {
 			return a.time - b.time;
@@ -252,17 +254,19 @@ export default class BufferSyncSupport {
 
 		// Add all open TS buffers to the geterr request. They might be visible
 		for (const file of this.syncedBuffers.keys()) {
-			if (!this.pendingDiagnostics[file]) {
+			if (!this.pendingDiagnostics.get(file)) {
 				files.push(file);
 			}
 		}
 
-		let args: Proto.GeterrRequestArgs = {
-			delay: 0,
-			files: files
-		};
-		this.client.execute('geterr', args, false);
-		this.pendingDiagnostics = Object.create(null);
+		if (files.length) {
+			const args: Proto.GeterrRequestArgs = {
+				delay: 0,
+				files: files
+			};
+			this.client.execute('geterr', args, false);
+		}
+		this.pendingDiagnostics.clear();
 	}
 
 	private checkTSCVersion() {

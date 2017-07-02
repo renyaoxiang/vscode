@@ -8,7 +8,6 @@
 import URI from 'vs/base/common/uri';
 import { TPromise } from 'vs/base/common/winjs.base';
 import { IUntitledEditorService, UNTITLED_SCHEMA } from 'vs/workbench/services/untitled/common/untitledEditorService';
-import { IEnvironmentService } from 'vs/platform/environment/common/environment';
 import { IWorkbenchContribution } from 'vs/workbench/common/contributions';
 import { IPartService } from 'vs/workbench/services/part/common/partService';
 import errors = require('vs/base/common/errors');
@@ -17,7 +16,7 @@ import { IEditorGroupService } from 'vs/workbench/services/group/common/groupSer
 import { IWorkbenchEditorService } from 'vs/workbench/services/editor/common/editorService';
 import { Position, IResourceInput, IUntitledResourceInput } from 'vs/platform/editor/common/editor';
 import { ITextFileService } from 'vs/workbench/services/textfile/common/textfiles';
-import { Schemas } from "vs/base/common/network";
+import { Schemas } from 'vs/base/common/network';
 
 export class BackupRestorer implements IWorkbenchContribution {
 
@@ -25,7 +24,6 @@ export class BackupRestorer implements IWorkbenchContribution {
 
 	constructor(
 		@IUntitledEditorService private untitledEditorService: IUntitledEditorService,
-		@IEnvironmentService private environmentService: IEnvironmentService,
 		@IPartService private partService: IPartService,
 		@IWorkbenchEditorService private editorService: IWorkbenchEditorService,
 		@IBackupFileService private backupFileService: IBackupFileService,
@@ -36,14 +34,14 @@ export class BackupRestorer implements IWorkbenchContribution {
 	}
 
 	private restoreBackups(): void {
-		if (!this.environmentService.isExtensionDevelopment) {
+		if (this.backupFileService.backupEnabled) {
 			this.partService.joinCreation().then(() => {
 				this.doRestoreBackups().done(null, errors.onUnexpectedError);
 			});
 		}
 	}
 
-	private doRestoreBackups(): TPromise<any> {
+	private doRestoreBackups(): TPromise<URI[]> {
 
 		// Find all files and untitled with backups
 		return this.backupFileService.getWorkspaceFileBackups().then(backups => {
@@ -55,7 +53,8 @@ export class BackupRestorer implements IWorkbenchContribution {
 				if (unresolved.length > 0) {
 					return this.doOpenEditors(unresolved).then(() => this.doResolveOpenedBackups(unresolved));
 				}
-				return undefined;
+
+				return void 0;
 			});
 		});
 	}
@@ -63,7 +62,7 @@ export class BackupRestorer implements IWorkbenchContribution {
 	private doResolveOpenedBackups(backups: URI[]): TPromise<URI[]> {
 		const stacks = this.groupService.getStacksModel();
 
-		const restorePromises: TPromise<any>[] = [];
+		const restorePromises: TPromise<number>[] = [];
 		const unresolved: URI[] = [];
 
 		backups.forEach(backup => {
@@ -101,7 +100,6 @@ export class BackupRestorer implements IWorkbenchContribution {
 
 		return { resource, options };
 	}
-
 
 	public getId(): string {
 		return 'vs.backup.backupRestorer';
