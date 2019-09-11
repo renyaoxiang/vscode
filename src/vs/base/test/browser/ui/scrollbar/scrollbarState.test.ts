@@ -2,7 +2,6 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-'use strict';
 
 import * as assert from 'assert';
 import { ScrollbarState } from 'vs/base/browser/ui/scrollbar/scrollbarState';
@@ -21,7 +20,6 @@ suite('ScrollbarState', () => {
 		assert.equal(actual.isNeeded(), true);
 		assert.equal(actual.getSliderSize(), 20);
 		assert.equal(actual.getSliderPosition(), 249);
-		assert.equal(actual.getSliderCenter(), 259);
 
 
 		assert.equal(actual.getDesiredScrollPositionFromOffset(259), 32849);
@@ -33,7 +31,6 @@ suite('ScrollbarState', () => {
 		assert.equal(actual.isNeeded(), true);
 		assert.equal(actual.getSliderSize(), 20);
 		assert.equal(actual.getSliderPosition(), 249);
-		assert.equal(actual.getSliderCenter(), 259);
 	});
 
 	test('inflates slider size with arrows', () => {
@@ -49,7 +46,6 @@ suite('ScrollbarState', () => {
 		assert.equal(actual.isNeeded(), true);
 		assert.equal(actual.getSliderSize(), 20);
 		assert.equal(actual.getSliderPosition(), 230);
-		assert.equal(actual.getSliderCenter(), 240);
 
 
 		assert.equal(actual.getDesiredScrollPositionFromOffset(240 + 12), 32811);
@@ -61,6 +57,5 @@ suite('ScrollbarState', () => {
 		assert.equal(actual.isNeeded(), true);
 		assert.equal(actual.getSliderSize(), 20);
 		assert.equal(actual.getSliderPosition(), 230);
-		assert.equal(actual.getSliderCenter(), 240);
 	});
 });

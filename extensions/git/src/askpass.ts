@@ -3,13 +3,12 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-'use strict';
-
 import { Disposable, window, InputBoxOptions } from 'vscode';
 import { denodeify } from './util';
 import * as path from 'path';
 import * as http from 'http';
 import * as os from 'os';
+import * as fs from 'fs';
 import * as crypto from 'crypto';
 
 const randomBytes = denodeify<Buffer>(crypto.randomBytes);
@@ -28,7 +27,7 @@ function getIPCHandlePath(nonce: string): string {
 	}
 
 	if (process.env['XDG_RUNTIME_DIR']) {
-		return path.join(process.env['XDG_RUNTIME_DIR'], `vscode-git-askpass-${nonce}.sock`);
+		return path.join(process.env['XDG_RUNTIME_DIR'] as string, `vscode-git-askpass-${nonce}.sock`);
 	}
 
 	return path.join(os.tmpdir(), `vscode-git-askpass-${nonce}.sock`);
@@ -38,17 +37,22 @@ export class Askpass implements Disposable {
 
 	private server: http.Server;
 	private ipcHandlePathPromise: Promise<string>;
+	private ipcHandlePath: string | undefined;
 	private enabled = true;
 
 	constructor() {
 		this.server = http.createServer((req, res) => this.onRequest(req, res));
-		this.ipcHandlePathPromise = this.setup().catch(err => console.error(err));
+		this.ipcHandlePathPromise = this.setup().catch(err => {
+			console.error(err);
+			return '';
+		});
 	}
 
 	private async setup(): Promise<string> {
 		const buffer = await randomBytes(20);
 		const nonce = buffer.toString('hex');
 		const ipcHandlePath = getIPCHandlePath(nonce);
+		this.ipcHandlePath = ipcHandlePath;
 
 		try {
 			this.server.listen(ipcHandlePath);
@@ -61,7 +65,7 @@ export class Askpass implements Disposable {
 		return ipcHandlePath;
 	}
 
-	private onRequest(req: http.ServerRequest, res: http.ServerResponse): void {
+	private onRequest(req: http.IncomingMessage, res: http.ServerResponse): void {
 		const chunks: string[] = [];
 		req.setEncoding('utf8');
 		req.on('data', (d: string) => chunks.push(d));
@@ -107,5 +111,9 @@ export class Askpass implements Disposable {
 
 	dispose(): void {
 		this.server.close();
+
+		if (this.ipcHandlePath && process.platform !== 'win32') {
+			fs.unlinkSync(this.ipcHandlePath);
+		}
 	}
 }

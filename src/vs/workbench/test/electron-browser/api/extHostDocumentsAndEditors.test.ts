@@ -3,24 +3,17 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-'use strict';
-
 import * as assert from 'assert';
-import URI from 'vs/base/common/uri';
-import { ExtHostDocumentsAndEditors } from 'vs/workbench/api/node/extHostDocumentsAndEditors';
-import { TPromise } from 'vs/base/common/winjs.base';
-
+import { URI } from 'vs/base/common/uri';
+import { ExtHostDocumentsAndEditors } from 'vs/workbench/api/common/extHostDocumentsAndEditors';
+import { TestRPCProtocol } from 'vs/workbench/test/electron-browser/api/testRPCProtocol';
 
 suite('ExtHostDocumentsAndEditors', () => {
 
 	let editors: ExtHostDocumentsAndEditors;
 
 	setup(function () {
-		editors = new ExtHostDocumentsAndEditors({
-			_serviceBrand: undefined,
-			get() { return undefined; },
-			set() { }
-		});
+		editors = new ExtHostDocumentsAndEditors(new TestRPCProtocol());
 	});
 
 	test('The value of TextDocument.isClosed is incorrect when a text document is closed, #27949', () => {
@@ -30,7 +23,7 @@ suite('ExtHostDocumentsAndEditors', () => {
 				EOL: '\n',
 				isDirty: true,
 				modeId: 'fooLang',
-				url: URI.parse('foo:bar'),
+				uri: URI.parse('foo:bar'),
 				versionId: 1,
 				lines: [
 					'first',
@@ -39,7 +32,7 @@ suite('ExtHostDocumentsAndEditors', () => {
 			}]
 		});
 
-		return new TPromise((resolve, reject) => {
+		return new Promise((resolve, reject) => {
 
 			editors.onDidRemoveDocuments(e => {
 				try {
@@ -54,7 +47,7 @@ suite('ExtHostDocumentsAndEditors', () => {
 			});
 
 			editors.$acceptDocumentsAndEditorsDelta({
-				removedDocuments: ['foo:bar']
+				removedDocuments: [URI.parse('foo:bar')]
 			});
 
 		});

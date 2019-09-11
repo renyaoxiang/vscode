@@ -24,8 +24,18 @@ declare module 'EmmetNode' {
         toString(): string
     }
 
+    export interface CssToken extends Token {
+        size: number
+        item(number: number): any
+        type: string
+    }
+
+    export interface HtmlToken extends Token {
+        value: string
+    }
+
     export interface Attribute extends Token {
-        name: string
+        name: Token
         value: Token
     }
 
@@ -42,6 +52,7 @@ declare module 'EmmetNode' {
     }
 
     export interface CssNode extends Node {
+        name: string
         parent: CssNode
         firstChild: CssNode
         nextSibling: CssNode
@@ -51,10 +62,17 @@ declare module 'EmmetNode' {
 
     export interface Rule extends CssNode {
         selectorToken: Token
+        contentStartToken: Token
+        contentEndToken: Token
     }
 
     export interface Property extends CssNode {
         valueToken: Token
+        separator: string
+        parent: Rule
+        terminatorToken: Token
+        separatorToken: Token
+        value: string
     }
 
     export interface Stylesheet extends Node {
@@ -67,8 +85,8 @@ declare module 'EmmetNode' {
         backUp(n: number): number
         current(): string
         substring(from: Position, to: Position): string
-        eat(match): boolean
-        eatWhile(match): boolean
+        eat(match: any): boolean
+        eatWhile(match: any): boolean
     }
 }
 

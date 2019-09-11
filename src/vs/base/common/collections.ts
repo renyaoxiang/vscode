@@ -2,24 +2,19 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-'use strict';
-
 
 /**
  * An interface for a JavaScript object that
  * acts a dictionary. The keys are strings.
  */
-export interface IStringDictionary<V> {
-	[name: string]: V;
-}
+export type IStringDictionary<V> = Record<string, V>;
+
 
 /**
  * An interface for a JavaScript object that
  * acts a dictionary. The keys are numbers.
  */
-export interface INumberDictionary<V> {
-	[idx: number]: V;
-}
+export type INumberDictionary<V> = Record<number, V>;
 
 const hasOwnProperty = Object.prototype.hasOwnProperty;
 
@@ -29,9 +24,9 @@ const hasOwnProperty = Object.prototype.hasOwnProperty;
  */
 export function values<T>(from: IStringDictionary<T> | INumberDictionary<T>): T[] {
 	const result: T[] = [];
-	for (var key in from) {
+	for (let key in from) {
 		if (hasOwnProperty.call(from, key)) {
-			result.push(from[key]);
+			result.push((from as any)[key]);
 		}
 	}
 	return result;
@@ -39,7 +34,7 @@ export function values<T>(from: IStringDictionary<T> | INumberDictionary<T>): T[
 
 export function size<T>(from: IStringDictionary<T> | INumberDictionary<T>): number {
 	let count = 0;
-	for (var key in from) {
+	for (let key in from) {
 		if (hasOwnProperty.call(from, key)) {
 			count += 1;
 		}
@@ -47,33 +42,30 @@ export function size<T>(from: IStringDictionary<T> | INumberDictionary<T>): numb
 	return count;
 }
 
+export function first<T>(from: IStringDictionary<T> | INumberDictionary<T>): T | undefined {
+	for (const key in from) {
+		if (hasOwnProperty.call(from, key)) {
+			return (from as any)[key];
+		}
+	}
+	return undefined;
+}
+
 /**
  * Iterates over each entry in the provided set. The iterator allows
  * to remove elements and will stop when the callback returns {{false}}.
  */
-export function forEach<T>(from: IStringDictionary<T> | INumberDictionary<T>, callback: (entry: { key: any; value: T; }, remove: Function) => any): void {
+export function forEach<T>(from: IStringDictionary<T> | INumberDictionary<T>, callback: (entry: { key: any; value: T; }, remove: () => void) => any): void {
 	for (let key in from) {
 		if (hasOwnProperty.call(from, key)) {
-			const result = callback({ key: key, value: from[key] }, function () {
-				delete from[key];
+			const result = callback({ key: key, value: (from as any)[key] }, function () {
+				delete (from as any)[key];
 			});
 			if (result === false) {
 				return;
 			}
 		}
 	}
-}
-
-/**
- * Removes an element from the dictionary. Returns {{false}} if the property
- * does not exists.
- */
-export function remove<T>(from: IStringDictionary<T> | INumberDictionary<T>, key: string): boolean {
-	if (!hasOwnProperty.call(from, key)) {
-		return false;
-	}
-	delete from[key];
-	return true;
 }
 
 /**
@@ -91,4 +83,54 @@ export function groupBy<T>(data: T[], groupFn: (element: T) => string): IStringD
 		target.push(element);
 	}
 	return result;
+}
+
+export function fromMap<T>(original: Map<string, T>): IStringDictionary<T> {
+	const result: IStringDictionary<T> = Object.create(null);
+	if (original) {
+		original.forEach((value, key) => {
+			result[key] = value;
+		});
+	}
+	return result;
+}
+
+export class SetMap<K, V> {
+
+	private map = new Map<K, Set<V>>();
+
+	add(key: K, value: V): void {
+		let values = this.map.get(key);
+
+		if (!values) {
+			values = new Set<V>();
+			this.map.set(key, values);
+		}
+
+		values.add(value);
+	}
+
+	delete(key: K, value: V): void {
+		const values = this.map.get(key);
+
+		if (!values) {
+			return;
+		}
+
+		values.delete(value);
+
+		if (values.size === 0) {
+			this.map.delete(key);
+		}
+	}
+
+	forEach(key: K, fn: (value: V) => void): void {
+		const values = this.map.get(key);
+
+		if (!values) {
+			return;
+		}
+
+		values.forEach(fn);
+	}
 }

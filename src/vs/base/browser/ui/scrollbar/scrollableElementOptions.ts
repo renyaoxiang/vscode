@@ -2,7 +2,6 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-'use strict';
 
 import { ScrollbarVisibility } from 'vs/base/common/scrollable';
 
@@ -27,6 +26,11 @@ export interface ScrollableElementCreationOptions {
 	 */
 	handleMouseWheel?: boolean;
 	/**
+	 * If mouse wheel is handled, make mouse wheel scrolling smooth.
+	 * Defaults to true.
+	 */
+	mouseWheelSmoothScroll?: boolean;
+	/**
 	 * Flip axes. Treat vertical scrolling like horizontal and vice-versa.
 	 * Defaults to false.
 	 */
@@ -46,6 +50,11 @@ export interface ScrollableElementCreationOptions {
 	 * Defaults to 1.
 	 */
 	mouseWheelScrollSensitivity?: number;
+	/**
+	 * FastScrolling mulitplier speed when pressing `Alt`
+	 * Defaults to 5.
+	 */
+	fastScrollSensitivity?: number;
 	/**
 	 * Height for vertical arrows (top/bottom) and width for horizontal arrows (left/right).
 	 * Defaults to 11.
@@ -103,6 +112,7 @@ export interface ScrollableElementCreationOptions {
 export interface ScrollableElementChangeOptions {
 	handleMouseWheel?: boolean;
 	mouseWheelScrollSensitivity?: number;
+	fastScrollSensitivity: number;
 }
 
 export interface ScrollableElementResolvedOptions {
@@ -114,8 +124,10 @@ export interface ScrollableElementResolvedOptions {
 	scrollYToX: boolean;
 	alwaysConsumeMouseWheel: boolean;
 	mouseWheelScrollSensitivity: number;
+	fastScrollSensitivity: number;
+	mouseWheelSmoothScroll: boolean;
 	arrowSize: number;
-	listenOnDomNode: HTMLElement;
+	listenOnDomNode: HTMLElement | null;
 	horizontal: ScrollbarVisibility;
 	horizontalScrollbarSize: number;
 	horizontalSliderSize: number;

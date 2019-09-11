@@ -2,13 +2,13 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-'use strict';
 
-import { Selection } from 'vs/editor/common/core/selection';
-import * as editorCommon from 'vs/editor/common/editorCommon';
 import { Range } from 'vs/editor/common/core/range';
+import { Selection } from 'vs/editor/common/core/selection';
+import { ICommand, ICursorStateComputerData, IEditOperationBuilder } from 'vs/editor/common/editorCommon';
+import { ITextModel } from 'vs/editor/common/model';
 
-export class ReplaceCommand implements editorCommon.ICommand {
+export class ReplaceCommand implements ICommand {
 
 	private readonly _range: Range;
 	private readonly _text: string;
@@ -20,11 +20,11 @@ export class ReplaceCommand implements editorCommon.ICommand {
 		this.insertsAutoWhitespace = insertsAutoWhitespace;
 	}
 
-	public getEditOperations(model: editorCommon.ITokenizedModel, builder: editorCommon.IEditOperationBuilder): void {
+	public getEditOperations(model: ITextModel, builder: IEditOperationBuilder): void {
 		builder.addTrackedEditOperation(this._range, this._text);
 	}
 
-	public computeCursorState(model: editorCommon.ITokenizedModel, helper: editorCommon.ICursorStateComputerData): Selection {
+	public computeCursorState(model: ITextModel, helper: ICursorStateComputerData): Selection {
 		let inverseEditOperations = helper.getInverseEditOperations();
 		let srcRange = inverseEditOperations[0].range;
 		return new Selection(
@@ -36,7 +36,7 @@ export class ReplaceCommand implements editorCommon.ICommand {
 	}
 }
 
-export class ReplaceCommandWithoutChangingPosition implements editorCommon.ICommand {
+export class ReplaceCommandWithoutChangingPosition implements ICommand {
 
 	private readonly _range: Range;
 	private readonly _text: string;
@@ -48,11 +48,11 @@ export class ReplaceCommandWithoutChangingPosition implements editorCommon.IComm
 		this.insertsAutoWhitespace = insertsAutoWhitespace;
 	}
 
-	public getEditOperations(model: editorCommon.ITokenizedModel, builder: editorCommon.IEditOperationBuilder): void {
+	public getEditOperations(model: ITextModel, builder: IEditOperationBuilder): void {
 		builder.addTrackedEditOperation(this._range, this._text);
 	}
 
-	public computeCursorState(model: editorCommon.ITokenizedModel, helper: editorCommon.ICursorStateComputerData): Selection {
+	public computeCursorState(model: ITextModel, helper: ICursorStateComputerData): Selection {
 		let inverseEditOperations = helper.getInverseEditOperations();
 		let srcRange = inverseEditOperations[0].range;
 		return new Selection(
@@ -64,7 +64,7 @@ export class ReplaceCommandWithoutChangingPosition implements editorCommon.IComm
 	}
 }
 
-export class ReplaceCommandWithOffsetCursorState implements editorCommon.ICommand {
+export class ReplaceCommandWithOffsetCursorState implements ICommand {
 
 	private readonly _range: Range;
 	private readonly _text: string;
@@ -80,11 +80,11 @@ export class ReplaceCommandWithOffsetCursorState implements editorCommon.IComman
 		this.insertsAutoWhitespace = insertsAutoWhitespace;
 	}
 
-	public getEditOperations(model: editorCommon.ITokenizedModel, builder: editorCommon.IEditOperationBuilder): void {
+	public getEditOperations(model: ITextModel, builder: IEditOperationBuilder): void {
 		builder.addTrackedEditOperation(this._range, this._text);
 	}
 
-	public computeCursorState(model: editorCommon.ITokenizedModel, helper: editorCommon.ICursorStateComputerData): Selection {
+	public computeCursorState(model: ITextModel, helper: ICursorStateComputerData): Selection {
 		let inverseEditOperations = helper.getInverseEditOperations();
 		let srcRange = inverseEditOperations[0].range;
 		return new Selection(
@@ -96,25 +96,26 @@ export class ReplaceCommandWithOffsetCursorState implements editorCommon.IComman
 	}
 }
 
-export class ReplaceCommandThatPreservesSelection implements editorCommon.ICommand {
+export class ReplaceCommandThatPreservesSelection implements ICommand {
 
-	private _range: Range;
-	private _text: string;
-	private _initialSelection: Selection;
-	private _selectionId: string;
+	private readonly _range: Range;
+	private readonly _text: string;
+	private readonly _initialSelection: Selection;
+	private _selectionId: string | null;
 
 	constructor(editRange: Range, text: string, initialSelection: Selection) {
 		this._range = editRange;
 		this._text = text;
 		this._initialSelection = initialSelection;
+		this._selectionId = null;
 	}
 
-	public getEditOperations(model: editorCommon.ITokenizedModel, builder: editorCommon.IEditOperationBuilder): void {
+	public getEditOperations(model: ITextModel, builder: IEditOperationBuilder): void {
 		builder.addEditOperation(this._range, this._text);
 		this._selectionId = builder.trackSelection(this._initialSelection);
 	}
 
-	public computeCursorState(model: editorCommon.ITokenizedModel, helper: editorCommon.ICursorStateComputerData): Selection {
-		return helper.getTrackedSelection(this._selectionId);
+	public computeCursorState(model: ITextModel, helper: ICursorStateComputerData): Selection {
+		return helper.getTrackedSelection(this._selectionId!);
 	}
 }

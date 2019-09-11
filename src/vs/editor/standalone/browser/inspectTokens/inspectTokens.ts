@@ -2,42 +2,38 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-'use strict';
 
 import 'vs/css!./inspectTokens';
-import * as nls from 'vs/nls';
+import { CharCode } from 'vs/base/common/charCode';
+import { Color } from 'vs/base/common/color';
 import { Disposable } from 'vs/base/common/lifecycle';
 import { escape } from 'vs/base/common/strings';
+import { ContentWidgetPositionPreference, IActiveCodeEditor, ICodeEditor, IContentWidget, IContentWidgetPosition } from 'vs/editor/browser/editorBrowser';
+import { EditorAction, ServicesAccessor, registerEditorAction, registerEditorContribution } from 'vs/editor/browser/editorExtensions';
 import { Position } from 'vs/editor/common/core/position';
-import { ICommonCodeEditor, IEditorContribution, IModel } from 'vs/editor/common/editorCommon';
-import { editorAction, EditorAction, ServicesAccessor } from 'vs/editor/common/editorCommonExtensions';
-import { ICodeEditor, ContentWidgetPositionPreference, IContentWidget, IContentWidgetPosition } from 'vs/editor/browser/editorBrowser';
-import { editorContribution } from 'vs/editor/browser/editorBrowserExtensions';
-import { IModeService } from 'vs/editor/common/services/modeService';
-import { TokenMetadata } from 'vs/editor/common/model/tokensBinaryEncoding';
-import { TokenizationRegistry, LanguageIdentifier, FontStyle, StandardTokenType, ITokenizationSupport, IState } from 'vs/editor/common/modes';
-import { CharCode } from 'vs/base/common/charCode';
-import { IStandaloneThemeService } from 'vs/editor/standalone/common/standaloneThemeService';
-import { NULL_STATE, nullTokenize, nullTokenize2 } from 'vs/editor/common/modes/nullMode';
 import { Token } from 'vs/editor/common/core/token';
-import { Color } from 'vs/base/common/color';
-import { registerThemingParticipant, HIGH_CONTRAST } from 'vs/platform/theme/common/themeService';
+import { IEditorContribution } from 'vs/editor/common/editorCommon';
+import { ITextModel } from 'vs/editor/common/model';
+import { FontStyle, IState, ITokenizationSupport, LanguageIdentifier, StandardTokenType, TokenMetadata, TokenizationRegistry } from 'vs/editor/common/modes';
+import { NULL_STATE, nullTokenize, nullTokenize2 } from 'vs/editor/common/modes/nullMode';
+import { IModeService } from 'vs/editor/common/services/modeService';
+import { IStandaloneThemeService } from 'vs/editor/standalone/common/standaloneThemeService';
 import { editorHoverBackground, editorHoverBorder } from 'vs/platform/theme/common/colorRegistry';
+import { HIGH_CONTRAST, registerThemingParticipant } from 'vs/platform/theme/common/themeService';
+import { InspectTokensNLS } from 'vs/editor/common/standaloneStrings';
 
 
-@editorContribution
 class InspectTokensController extends Disposable implements IEditorContribution {
 
-	private static ID = 'editor.contrib.inspectTokens';
+	private static readonly ID = 'editor.contrib.inspectTokens';
 
-	public static get(editor: ICommonCodeEditor): InspectTokensController {
+	public static get(editor: ICodeEditor): InspectTokensController {
 		return editor.getContribution<InspectTokensController>(InspectTokensController.ID);
 	}
 
-	private _editor: ICodeEditor;
-	private _standaloneThemeService: IStandaloneThemeService;
-	private _modeService: IModeService;
-	private _widget: InspectTokensWidget;
+	private readonly _editor: ICodeEditor;
+	private readonly _modeService: IModeService;
+	private _widget: InspectTokensWidget | null;
 
 	constructor(
 		editor: ICodeEditor,
@@ -46,7 +42,6 @@ class InspectTokensController extends Disposable implements IEditorContribution 
 	) {
 		super();
 		this._editor = editor;
-		this._standaloneThemeService = standaloneColorService;
 		this._modeService = modeService;
 		this._widget = null;
 
@@ -68,10 +63,10 @@ class InspectTokensController extends Disposable implements IEditorContribution 
 		if (this._widget) {
 			return;
 		}
-		if (!this._editor.getModel()) {
+		if (!this._editor.hasModel()) {
 			return;
 		}
-		this._widget = new InspectTokensWidget(this._editor, this._standaloneThemeService, this._modeService);
+		this._widget = new InspectTokensWidget(this._editor, this._modeService);
 	}
 
 	public stop(): void {
@@ -82,19 +77,18 @@ class InspectTokensController extends Disposable implements IEditorContribution 
 	}
 }
 
-@editorAction
 class InspectTokens extends EditorAction {
 
 	constructor() {
 		super({
 			id: 'editor.action.inspectTokens',
-			label: nls.localize('inspectTokens', "Developer: Inspect Tokens"),
+			label: InspectTokensNLS.inspectTokensAction,
 			alias: 'Developer: Inspect Tokens',
-			precondition: null
+			precondition: undefined
 		});
 	}
 
-	public run(accessor: ServicesAccessor, editor: ICommonCodeEditor): void {
+	public run(accessor: ServicesAccessor, editor: ICodeEditor): void {
 		let controller = InspectTokensController.get(editor);
 		if (controller) {
 			controller.launch();
@@ -163,26 +157,23 @@ function getSafeTokenizationSupport(languageIdentifier: LanguageIdentifier): ITo
 
 class InspectTokensWidget extends Disposable implements IContentWidget {
 
-	private static _ID = 'editor.contrib.inspectTokensWidget';
+	private static readonly _ID = 'editor.contrib.inspectTokensWidget';
 
 	// Editor.IContentWidget.allowEditorOverflow
 	public allowEditorOverflow = true;
 
-	private _editor: ICodeEditor;
-	private _standaloneThemeService: IStandaloneThemeService;
-	private _modeService: IModeService;
-	private _tokenizationSupport: ITokenizationSupport;
-	private _model: IModel;
-	private _domNode: HTMLElement;
+	private readonly _editor: IActiveCodeEditor;
+	private readonly _modeService: IModeService;
+	private readonly _tokenizationSupport: ITokenizationSupport;
+	private readonly _model: ITextModel;
+	private readonly _domNode: HTMLElement;
 
 	constructor(
-		editor: ICodeEditor,
-		standaloneThemeService: IStandaloneThemeService,
+		editor: IActiveCodeEditor,
 		modeService: IModeService
 	) {
 		super();
 		this._editor = editor;
-		this._standaloneThemeService = standaloneThemeService;
 		this._modeService = modeService;
 		this._model = this._editor.getModel();
 		this._domNode = document.createElement('div');
@@ -240,8 +231,8 @@ class InspectTokensWidget extends Disposable implements IContentWidget {
 		result += `<tr><td class="tm-metadata-key">language</td><td class="tm-metadata-value">${escape(metadata.languageIdentifier.language)}</td>`;
 		result += `<tr><td class="tm-metadata-key">token type</td><td class="tm-metadata-value">${this._tokenTypeToString(metadata.tokenType)}</td>`;
 		result += `<tr><td class="tm-metadata-key">font style</td><td class="tm-metadata-value">${this._fontStyleToString(metadata.fontStyle)}</td>`;
-		result += `<tr><td class="tm-metadata-key">foreground</td><td class="tm-metadata-value">${metadata.foreground.toRGBHex()}</td>`;
-		result += `<tr><td class="tm-metadata-key">background</td><td class="tm-metadata-value">${metadata.background.toRGBHex()}</td>`;
+		result += `<tr><td class="tm-metadata-key">foreground</td><td class="tm-metadata-value">${Color.Format.CSS.formatHex(metadata.foreground)}</td>`;
+		result += `<tr><td class="tm-metadata-key">background</td><td class="tm-metadata-value">${Color.Format.CSS.formatHex(metadata.background)}</td>`;
 		result += `</tbody></table>`;
 
 		result += `<hr class="tokens-inspect-separator"/>`;
@@ -255,14 +246,14 @@ class InspectTokensWidget extends Disposable implements IContentWidget {
 	}
 
 	private _decodeMetadata(metadata: number): IDecodedMetadata {
-		let colorMap = TokenizationRegistry.getColorMap();
+		let colorMap = TokenizationRegistry.getColorMap()!;
 		let languageId = TokenMetadata.getLanguageId(metadata);
 		let tokenType = TokenMetadata.getTokenType(metadata);
 		let fontStyle = TokenMetadata.getFontStyle(metadata);
 		let foreground = TokenMetadata.getForeground(metadata);
 		let background = TokenMetadata.getBackground(metadata);
 		return {
-			languageIdentifier: this._modeService.getLanguageIdentifier(languageId),
+			languageIdentifier: this._modeService.getLanguageIdentifier(languageId)!,
 			tokenType: tokenType,
 			fontStyle: fontStyle,
 			foreground: colorMap[foreground],
@@ -334,14 +325,17 @@ class InspectTokensWidget extends Disposable implements IContentWidget {
 	}
 }
 
+registerEditorContribution(InspectTokensController);
+registerEditorAction(InspectTokens);
+
 registerThemingParticipant((theme, collector) => {
-	let border = theme.getColor(editorHoverBorder);
+	const border = theme.getColor(editorHoverBorder);
 	if (border) {
 		let borderWidth = theme.type === HIGH_CONTRAST ? 2 : 1;
 		collector.addRule(`.monaco-editor .tokens-inspect-widget { border: ${borderWidth}px solid ${border}; }`);
 		collector.addRule(`.monaco-editor .tokens-inspect-widget .tokens-inspect-separator { background-color: ${border}; }`);
 	}
-	let background = theme.getColor(editorHoverBackground);
+	const background = theme.getColor(editorHoverBackground);
 	if (background) {
 		collector.addRule(`.monaco-editor .tokens-inspect-widget { background-color: ${background}; }`);
 	}

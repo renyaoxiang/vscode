@@ -3,14 +3,13 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-'use strict';
-
 import * as assert from 'assert';
-import { ExtHostCommands } from 'vs/workbench/api/node/extHostCommands';
-import { MainThreadCommandsShape } from 'vs/workbench/api/node/extHost.protocol';
-import { TPromise } from 'vs/base/common/winjs.base';
+import { ExtHostCommands } from 'vs/workbench/api/common/extHostCommands';
+import { MainThreadCommandsShape } from 'vs/workbench/api/common/extHost.protocol';
 import { CommandsRegistry } from 'vs/platform/commands/common/commands';
-import { OneGetThreadService } from './testThreadService';
+import { SingleProxyRPCProtocol } from './testRPCProtocol';
+import { mock } from 'vs/workbench/test/electron-browser/api/mock';
+import { NullLogService } from 'vs/platform/log/common/log';
 
 suite('ExtHostCommands', function () {
 
@@ -18,19 +17,21 @@ suite('ExtHostCommands', function () {
 
 		let lastUnregister: string;
 
-		const shape = new class extends MainThreadCommandsShape {
-			$registerCommand(id: string): TPromise<any> {
-				return undefined;
+		const shape = new class extends mock<MainThreadCommandsShape>() {
+			$registerCommand(id: string): void {
+				//
 			}
-			$unregisterCommand(id: string): TPromise<any> {
+			$unregisterCommand(id: string): void {
 				lastUnregister = id;
-				return undefined;
 			}
 		};
 
-		const commands = new ExtHostCommands(OneGetThreadService(shape), undefined);
-		commands.registerCommand('foo', (): any => { }).dispose();
-		assert.equal(lastUnregister, 'foo');
+		const commands = new ExtHostCommands(
+			SingleProxyRPCProtocol(shape),
+			new NullLogService()
+		);
+		commands.registerCommand(true, 'foo', (): any => { }).dispose();
+		assert.equal(lastUnregister!, 'foo');
 		assert.equal(CommandsRegistry.getCommand('foo'), undefined);
 
 	});
@@ -39,18 +40,20 @@ suite('ExtHostCommands', function () {
 
 		let unregisterCounter = 0;
 
-		const shape = new class extends MainThreadCommandsShape {
-			$registerCommand(id: string): TPromise<any> {
-				return undefined;
+		const shape = new class extends mock<MainThreadCommandsShape>() {
+			$registerCommand(id: string): void {
+				//
 			}
-			$unregisterCommand(id: string): TPromise<any> {
+			$unregisterCommand(id: string): void {
 				unregisterCounter += 1;
-				return undefined;
 			}
 		};
 
-		const commands = new ExtHostCommands(OneGetThreadService(shape), undefined);
-		const reg = commands.registerCommand('foo', (): any => { });
+		const commands = new ExtHostCommands(
+			SingleProxyRPCProtocol(shape),
+			new NullLogService()
+		);
+		const reg = commands.registerCommand(true, 'foo', (): any => { });
 		reg.dispose();
 		reg.dispose();
 		reg.dispose();

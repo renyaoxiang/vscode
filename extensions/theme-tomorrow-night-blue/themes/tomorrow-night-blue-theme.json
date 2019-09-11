@@ -14,7 +14,8 @@
 		"editor.background": "#002451",
 		"editor.foreground": "#ffffff",
 		"editor.selectionBackground": "#003f8e",
-		"editor.lineHighlightBackground": "#00346e",
+        "editor.lineHighlightBackground": "#00346e",
+        "editorLineNumber.activeForeground": "#949494",
 		"editorCursor.foreground": "#ffffff",
 		"editorWhitespace.foreground": "#404f7d",
 		"editorWidget.background": "#001c40",
@@ -22,13 +23,14 @@
 		"editorHoverWidget.border": "#ffffff44",
 		"editorGroup.border": "#404f7d",
 		"editorGroupHeader.tabsBackground": "#001733",
-		"editorGroup.background": "#1c1c2a",
 		"editorGroup.dropBackground": "#25375daa",
 		"peekViewResult.background": "#001c40",
 		"tab.inactiveBackground": "#001c40",
+		"tab.modifiedBorder": "#FFEEAD",
 		"debugToolBar.background": "#001c40",
 		"titleBar.activeBackground": "#001126",
 		"statusBar.background": "#001126",
+		"statusBarItem.remoteBackground": "#0e639c",
 		"statusBar.noFolderBackground": "#001126",
 		"statusBar.debuggingBackground": "#001126",
 		"activityBar.background": "#001733",
@@ -55,6 +57,13 @@
 	},
 	"tokenColors": [
 		{
+			"settings": {
+				"background": "#002451",
+				"foreground": "#FFFFFF"
+			}
+		},
+		{
+			"scope": ["meta.embedded", "source.groovy.embedded"],
 			"settings": {
 				"background": "#002451",
 				"foreground": "#FFFFFF"
@@ -92,7 +101,7 @@
 		},
 		{
 			"name": "Class, Support",
-			"scope": "entity.name.class, entity.name.type, support.type, support.class",
+			"scope": "entity.name.class, entity.name.type, entity.name.namespace, entity.name.scope-resolution, support.type, support.class",
 			"settings": {
 				"fontStyle": "",
 				"foreground": "#FFEEAD"

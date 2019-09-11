@@ -2,18 +2,17 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-'use strict';
 
-import * as Platform from 'vs/base/common/platform';
-import * as DomUtils from 'vs/base/browser/dom';
-import { IMouseEvent, StandardMouseWheelEvent } from 'vs/base/browser/mouseEvent';
-import { GlobalMouseMoveMonitor, IStandardMouseMoveEventData, standardMouseMoveMerger } from 'vs/base/browser/globalMouseMoveMonitor';
-import { Widget } from 'vs/base/browser/ui/widget';
+import * as dom from 'vs/base/browser/dom';
 import { FastDomNode, createFastDomNode } from 'vs/base/browser/fastDomNode';
-import { ScrollbarState } from 'vs/base/browser/ui/scrollbar/scrollbarState';
+import { GlobalMouseMoveMonitor, IStandardMouseMoveEventData, standardMouseMoveMerger } from 'vs/base/browser/globalMouseMoveMonitor';
+import { IMouseEvent, StandardWheelEvent } from 'vs/base/browser/mouseEvent';
 import { ScrollbarArrow, ScrollbarArrowOptions } from 'vs/base/browser/ui/scrollbar/scrollbarArrow';
+import { ScrollbarState } from 'vs/base/browser/ui/scrollbar/scrollbarState';
 import { ScrollbarVisibilityController } from 'vs/base/browser/ui/scrollbar/scrollbarVisibilityController';
-import { Scrollable, ScrollbarVisibility } from 'vs/base/common/scrollable';
+import { Widget } from 'vs/base/browser/ui/widget';
+import * as platform from 'vs/base/common/platform';
+import { INewScrollPosition, Scrollable, ScrollbarVisibility } from 'vs/base/common/scrollable';
 
 /**
  * The orthogonal distance to the slider at which dragging "resets". This implements "snapping"
@@ -26,7 +25,7 @@ export interface ISimplifiedMouseEvent {
 }
 
 export interface ScrollbarHost {
-	onMouseWheel(mouseWheelEvent: StandardMouseWheelEvent): void;
+	onMouseWheel(mouseWheelEvent: StandardWheelEvent): void;
 	onDragStart(): void;
 	onDragEnd(): void;
 }
@@ -50,7 +49,7 @@ export abstract class AbstractScrollbar extends Widget {
 	private _mouseMoveMonitor: GlobalMouseMoveMonitor<IStandardMouseMoveEventData>;
 
 	public domNode: FastDomNode<HTMLElement>;
-	public slider: FastDomNode<HTMLElement>;
+	public slider!: FastDomNode<HTMLElement>;
 
 	protected _shouldRender: boolean;
 
@@ -87,14 +86,18 @@ export abstract class AbstractScrollbar extends Widget {
 	/**
 	 * Creates the slider dom node, adds it to the container & hooks up the events
 	 */
-	protected _createSlider(top: number, left: number, width: number, height: number): void {
+	protected _createSlider(top: number, left: number, width: number | undefined, height: number | undefined): void {
 		this.slider = createFastDomNode(document.createElement('div'));
 		this.slider.setClassName('slider');
 		this.slider.setPosition('absolute');
 		this.slider.setTop(top);
 		this.slider.setLeft(left);
-		this.slider.setWidth(width);
-		this.slider.setHeight(height);
+		if (typeof width === 'number') {
+			this.slider.setWidth(width);
+		}
+		if (typeof height === 'number') {
+			this.slider.setHeight(height);
+		}
 		this.slider.setLayerHinting(true);
 
 		this.domNode.domNode.appendChild(this.slider.domNode);
@@ -103,6 +106,12 @@ export abstract class AbstractScrollbar extends Widget {
 			if (e.leftButton) {
 				e.preventDefault();
 				this._sliderMouseDown(e, () => { /*nothing to do*/ });
+			}
+		});
+
+		this.onclick(this.slider.domNode, e => {
+			if (e.leftButton) {
+				e.stopPropagation();
 			}
 		});
 	}
@@ -187,13 +196,18 @@ export abstract class AbstractScrollbar extends Widget {
 		}
 	}
 
-	public delegateSliderMouseDown(e: ISimplifiedMouseEvent, onDragFinished: () => void): void {
-		this._sliderMouseDown(e, onDragFinished);
-	}
-
 	private _onMouseDown(e: IMouseEvent): void {
-		let domNodePosition = DomUtils.getDomNodePagePosition(this.domNode.domNode);
-		this.setDesiredScrollPosition(this._scrollbarState.getDesiredScrollPositionFromOffset(this._mouseDownRelativePosition(e, domNodePosition)));
+		let offsetX: number;
+		let offsetY: number;
+		if (e.target === this.domNode.domNode && typeof e.browserEvent.offsetX === 'number' && typeof e.browserEvent.offsetY === 'number') {
+			offsetX = e.browserEvent.offsetX;
+			offsetY = e.browserEvent.offsetY;
+		} else {
+			const domNodePosition = dom.getDomNodePagePosition(this.domNode.domNode);
+			offsetX = e.posx - domNodePosition.left;
+			offsetY = e.posy - domNodePosition.top;
+		}
+		this._setDesiredScrollPositionNow(this._scrollbarState.getDesiredScrollPositionFromOffset(this._mouseDownRelativePosition(offsetX, offsetY)));
 		if (e.leftButton) {
 			e.preventDefault();
 			this._sliderMouseDown(e, () => { /*nothing to do*/ });
@@ -212,15 +226,15 @@ export abstract class AbstractScrollbar extends Widget {
 				const mouseOrthogonalPosition = this._sliderOrthogonalMousePosition(mouseMoveData);
 				const mouseOrthogonalDelta = Math.abs(mouseOrthogonalPosition - initialMouseOrthogonalPosition);
 
-				if (Platform.isWindows && mouseOrthogonalDelta > MOUSE_DRAG_RESET_DISTANCE) {
+				if (platform.isWindows && mouseOrthogonalDelta > MOUSE_DRAG_RESET_DISTANCE) {
 					// The mouse has wondered away from the scrollbar => reset dragging
-					this.setDesiredScrollPosition(initialScrollbarState.getScrollPosition());
+					this._setDesiredScrollPositionNow(initialScrollbarState.getScrollPosition());
 					return;
 				}
 
 				const mousePosition = this._sliderMousePosition(mouseMoveData);
 				const mouseDelta = mousePosition - initialMousePosition;
-				this.setDesiredScrollPosition(initialScrollbarState.getDesiredScrollPositionFromDelta(mouseDelta));
+				this._setDesiredScrollPositionNow(initialScrollbarState.getDesiredScrollPositionFromDelta(mouseDelta));
 			},
 			() => {
 				this.slider.toggleClassName('active', false);
@@ -232,18 +246,12 @@ export abstract class AbstractScrollbar extends Widget {
 		this._host.onDragStart();
 	}
 
-	public setDesiredScrollPosition(desiredScrollPosition: number): boolean {
-		desiredScrollPosition = this.validateScrollPosition(desiredScrollPosition);
+	private _setDesiredScrollPositionNow(_desiredScrollPosition: number): void {
 
-		let oldScrollPosition = this._getScrollPosition();
-		this._setScrollPosition(desiredScrollPosition);
-		let newScrollPosition = this._getScrollPosition();
+		let desiredScrollPosition: INewScrollPosition = {};
+		this.writeScrollPosition(desiredScrollPosition, _desiredScrollPosition);
 
-		if (oldScrollPosition !== newScrollPosition) {
-			this._onElementScrollPosition(this._getScrollPosition());
-			return true;
-		}
-		return false;
+		this._scrollable.setScrollPositionNow(desiredScrollPosition);
 	}
 
 	// ----------------- Overwrite these
@@ -251,11 +259,9 @@ export abstract class AbstractScrollbar extends Widget {
 	protected abstract _renderDomNode(largeSize: number, smallSize: number): void;
 	protected abstract _updateSlider(sliderSize: number, sliderPosition: number): void;
 
-	protected abstract _mouseDownRelativePosition(e: ISimplifiedMouseEvent, domNodePosition: DomUtils.IDomNodePagePosition): number;
+	protected abstract _mouseDownRelativePosition(offsetX: number, offsetY: number): number;
 	protected abstract _sliderMousePosition(e: ISimplifiedMouseEvent): number;
 	protected abstract _sliderOrthogonalMousePosition(e: ISimplifiedMouseEvent): number;
 
-	protected abstract _getScrollPosition(): number;
-	protected abstract _setScrollPosition(elementScrollPosition: number): void;
-	public abstract validateScrollPosition(desiredScrollPosition: number): number;
+	public abstract writeScrollPosition(target: INewScrollPosition, scrollPosition: number): void;
 }

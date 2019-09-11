@@ -2,7 +2,6 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-'use strict';
 
 import * as dom from 'vs/base/browser/dom';
 
@@ -64,28 +63,12 @@ export class FastDomNode<T extends HTMLElement> {
 		this.domNode.style.width = this._width + 'px';
 	}
 
-	public unsetWidth(): void {
-		if (this._width === -1) {
-			return;
-		}
-		this._width = -1;
-		this.domNode.style.width = '';
-	}
-
 	public setHeight(height: number): void {
 		if (this._height === height) {
 			return;
 		}
 		this._height = height;
 		this.domNode.style.height = this._height + 'px';
-	}
-
-	public unsetHeight(): void {
-		if (this._height === -1) {
-			return;
-		}
-		this._height = -1;
-		this.domNode.style.height = '';
 	}
 
 	public setTop(top: number): void {
@@ -181,16 +164,6 @@ export class FastDomNode<T extends HTMLElement> {
 		this._className = this.domNode.className;
 	}
 
-	public addClassName(className: string): void {
-		dom.addClass(this.domNode, className);
-		this._className = this.domNode.className;
-	}
-
-	public removeClassName(className: string): void {
-		dom.removeClass(this.domNode, className);
-		this._className = this.domNode.className;
-	}
-
 	public setDisplay(display: string): void {
 		if (this._display === display) {
 			return;
@@ -227,16 +200,8 @@ export class FastDomNode<T extends HTMLElement> {
 		this.domNode.setAttribute(name, value);
 	}
 
-	public getAttribute(name: string): string {
-		return this.domNode.getAttribute(name);
-	}
-
 	public removeAttribute(name: string): void {
 		this.domNode.removeAttribute(name);
-	}
-
-	public hasAttribute(name: string): boolean {
-		return this.domNode.hasAttribute(name);
 	}
 
 	public appendChild(child: FastDomNode<any>): void {

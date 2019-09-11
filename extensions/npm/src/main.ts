@@ -2,130 +2,107 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-'use strict';
 
-import * as path from 'path';
-import * as fs from 'fs';
+import * as httpRequest from 'request-light';
 import * as vscode from 'vscode';
+import { addJSONProviders } from './features/jsonContributions';
+import { NpmScriptsTreeDataProvider } from './npmView';
+import { invalidateTasksCache, NpmTaskProvider, hasPackageJson } from './tasks';
+import { invalidateHoverScriptsCache, NpmScriptHoverProvider } from './scriptHover';
+import { runSelectedScript } from './commands';
 
-type AutoDetect = 'on' | 'off';
-let taskProvider: vscode.Disposable | undefined;
+let treeDataProvider: NpmScriptsTreeDataProvider | undefined;
 
-export function activate(_context: vscode.ExtensionContext): void {
-	let workspaceRoot = vscode.workspace.rootPath;
-	if (!workspaceRoot) {
-		return;
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
+	registerTaskProvider(context);
+	treeDataProvider = registerExplorer(context);
+	registerHoverProvider(context);
+
+	configureHttpRequest();
+	let d = vscode.workspace.onDidChangeConfiguration((e) => {
+		configureHttpRequest();
+		if (e.affectsConfiguration('npm.exclude')) {
+			invalidateTasksCache();
+			if (treeDataProvider) {
+				treeDataProvider.refresh();
+			}
+		}
+		if (e.affectsConfiguration('npm.scriptExplorerAction')) {
+			if (treeDataProvider) {
+				treeDataProvider.refresh();
+			}
+		}
+	});
+	context.subscriptions.push(d);
+
+	d = vscode.workspace.onDidChangeTextDocument((e) => {
+		invalidateHoverScriptsCache(e.document);
+	});
+	context.subscriptions.push(d);
+	context.subscriptions.push(vscode.commands.registerCommand('npm.runSelectedScript', runSelectedScript));
+	context.subscriptions.push(addJSONProviders(httpRequest.xhr));
+
+	if (await hasPackageJson()) {
+		vscode.commands.executeCommand('setContext', 'npm:showScriptExplorer', true);
 	}
+}
 
-	function onConfigurationChanged() {
-		let autoDetect = vscode.workspace.getConfiguration('npm').get<AutoDetect>('autoDetect');
-		if (taskProvider && autoDetect === 'off') {
-			taskProvider.dispose();
-			taskProvider = undefined;
-		} else if (!taskProvider && autoDetect === 'on') {
-			taskProvider = vscode.workspace.registerTaskProvider('npm', {
-				provideTasks: () => {
-					return getNpmScriptsAsTasks();
-				},
-				resolveTask(_task: vscode.Task): vscode.Task | undefined {
-					return undefined;
-				}
-			});
+function registerTaskProvider(context: vscode.ExtensionContext): vscode.Disposable | undefined {
+
+	function invalidateScriptCaches() {
+		invalidateHoverScriptsCache();
+		invalidateTasksCache();
+		if (treeDataProvider) {
+			treeDataProvider.refresh();
 		}
 	}
-	vscode.workspace.onDidChangeConfiguration(onConfigurationChanged);
-	onConfigurationChanged();
+
+	if (vscode.workspace.workspaceFolders) {
+		let watcher = vscode.workspace.createFileSystemWatcher('**/package.json');
+		watcher.onDidChange((_e) => invalidateScriptCaches());
+		watcher.onDidDelete((_e) => invalidateScriptCaches());
+		watcher.onDidCreate((_e) => invalidateScriptCaches());
+		context.subscriptions.push(watcher);
+
+		let workspaceWatcher = vscode.workspace.onDidChangeWorkspaceFolders((_e) => invalidateScriptCaches());
+		context.subscriptions.push(workspaceWatcher);
+
+		let provider: vscode.TaskProvider = new NpmTaskProvider();
+		let disposable = vscode.workspace.registerTaskProvider('npm', provider);
+		context.subscriptions.push(disposable);
+		return disposable;
+	}
+	return undefined;
+}
+
+function registerExplorer(context: vscode.ExtensionContext): NpmScriptsTreeDataProvider | undefined {
+	if (vscode.workspace.workspaceFolders) {
+		let treeDataProvider = new NpmScriptsTreeDataProvider(context);
+		const view = vscode.window.createTreeView('npm', { treeDataProvider: treeDataProvider, showCollapseAll: true });
+		context.subscriptions.push(view);
+		return treeDataProvider;
+	}
+	return undefined;
+}
+
+function registerHoverProvider(context: vscode.ExtensionContext): NpmScriptHoverProvider | undefined {
+	if (vscode.workspace.workspaceFolders) {
+		let npmSelector: vscode.DocumentSelector = {
+			language: 'json',
+			scheme: 'file',
+			pattern: '**/package.json'
+		};
+		let provider = new NpmScriptHoverProvider(context);
+		context.subscriptions.push(vscode.languages.registerHoverProvider(npmSelector, provider));
+		return provider;
+	}
+	return undefined;
+}
+
+function configureHttpRequest() {
+	const httpSettings = vscode.workspace.getConfiguration('http');
+	httpRequest.configure(httpSettings.get<string>('proxy', ''), httpSettings.get<boolean>('proxyStrictSSL', true));
 }
 
 export function deactivate(): void {
-	if (taskProvider) {
-		taskProvider.dispose();
-	}
-}
-
-async function exists(file: string): Promise<boolean> {
-	return new Promise<boolean>((resolve, _reject) => {
-		fs.exists(file, (value) => {
-			resolve(value);
-		});
-	});
-}
-
-async function readFile(file: string): Promise<string> {
-	return new Promise<string>((resolve, reject) => {
-		fs.readFile(file, (err, data) => {
-			if (err) {
-				reject(err);
-			}
-			resolve(data.toString());
-		});
-	});
-}
-
-interface NpmTaskDefinition extends vscode.TaskDefinition {
-	script: string;
-	file?: string;
-}
-
-const buildNames: string[] = ['build', 'compile', 'watch'];
-function isBuildTask(name: string): boolean {
-	for (let buildName of buildNames) {
-		if (name.indexOf(buildName) !== -1) {
-			return true;
-		}
-	}
-	return false;
-}
-
-const testNames: string[] = ['test'];
-function isTestTask(name: string): boolean {
-	for (let testName of testNames) {
-		if (name === testName) {
-			return true;
-		}
-	}
-	return false;
-}
-
-async function getNpmScriptsAsTasks(): Promise<vscode.Task[]> {
-	let workspaceRoot = vscode.workspace.rootPath;
-	let emptyTasks: vscode.Task[] = [];
-
-	if (!workspaceRoot) {
-		return emptyTasks;
-	}
-
-	let packageJson = path.join(workspaceRoot, 'package.json');
-	if (!await exists(packageJson)) {
-		return emptyTasks;
-	}
-
-	try {
-		var contents = await readFile(packageJson);
-		var json = JSON.parse(contents);
-		if (!json.scripts) {
-			return Promise.resolve(emptyTasks);
-		}
-
-		const result: vscode.Task[] = [];
-		Object.keys(json.scripts).forEach(each => {
-			const kind: NpmTaskDefinition = {
-				type: 'npm',
-				script: each
-			};
-			const task = new vscode.Task(kind, `run ${each}`, 'npm', new vscode.ShellExecution(`npm run ${each}`));
-			const lowerCaseTaskName = each.toLowerCase();
-			if (isBuildTask(lowerCaseTaskName)) {
-				task.group = vscode.TaskGroup.Build;
-			} else if (isTestTask(lowerCaseTaskName)) {
-				task.group = vscode.TaskGroup.Test;
-			}
-			result.push(task);
-		});
-		// add some 'well known' npm tasks
-		result.push(new vscode.Task({ type: 'npm', script: 'install' } as NpmTaskDefinition, `install`, 'npm', new vscode.ShellExecution(`npm install`)));
-		return Promise.resolve(result);
-	} catch (e) {
-		return Promise.resolve(emptyTasks);
-	}
 }

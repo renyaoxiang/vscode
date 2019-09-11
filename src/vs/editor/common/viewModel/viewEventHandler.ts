@@ -2,10 +2,9 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-'use strict';
 
-import * as viewEvents from 'vs/editor/common/view/viewEvents';
 import { Disposable } from 'vs/base/common/lifecycle';
+import * as viewEvents from 'vs/editor/common/view/viewEvents';
 
 export class ViewEventHandler extends Disposable {
 
@@ -47,6 +46,9 @@ export class ViewEventHandler extends Disposable {
 		return false;
 	}
 	public onFocusChanged(e: viewEvents.ViewFocusChangedEvent): boolean {
+		return false;
+	}
+	public onLanguageConfigurationChanged(e: viewEvents.ViewLanguageConfigurationEvent): boolean {
 		return false;
 	}
 	public onLineMappingChanged(e: viewEvents.ViewLineMappingChangedEvent): boolean {
@@ -121,6 +123,12 @@ export class ViewEventHandler extends Disposable {
 					}
 					break;
 
+				case viewEvents.ViewEventType.ViewLanguageConfigurationChanged:
+					if (this.onLanguageConfigurationChanged(e)) {
+						shouldRender = true;
+					}
+					break;
+
 				case viewEvents.ViewEventType.ViewLineMappingChanged:
 					if (this.onLineMappingChanged(e)) {
 						shouldRender = true;
@@ -174,7 +182,6 @@ export class ViewEventHandler extends Disposable {
 						shouldRender = true;
 					}
 					break;
-
 
 				case viewEvents.ViewEventType.ViewThemeChanged:
 					if (this.onThemeChanged(e)) {

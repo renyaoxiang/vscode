@@ -3,8 +3,6 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-'use strict';
-
 import * as http from 'http';
 import * as fs from 'fs';
 import * as nls from 'vscode-nls';
@@ -34,8 +32,8 @@ function main(argv: string[]): void {
 		return fatal('Skip fetch commands');
 	}
 
-	const output = process.env['VSCODE_GIT_ASKPASS_PIPE'];
-	const socketPath = process.env['VSCODE_GIT_ASKPASS_HANDLE'];
+	const output = process.env['VSCODE_GIT_ASKPASS_PIPE'] as string;
+	const socketPath = process.env['VSCODE_GIT_ASKPASS_HANDLE'] as string;
 	const request = argv[2];
 	const host = argv[4].substring(1, argv[4].length - 2);
 	const opts: http.RequestOptions = {

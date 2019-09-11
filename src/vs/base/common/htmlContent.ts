@@ -3,67 +3,87 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-'use strict';
+import { equals } from 'vs/base/common/arrays';
+import { UriComponents } from 'vs/base/common/uri';
 
-/**
- * MarkedString can be used to render human readable text. It is either a markdown string
- * or a code-block that provides a language and a code snippet. Note that
- * markdown strings will be sanitized - that means html will be escaped.
- */
-export type MarkedString = string | { readonly language: string; readonly value: string };
+export interface IMarkdownString {
+	value: string;
+	isTrusted?: boolean;
+	uris?: { [href: string]: UriComponents };
+}
 
-export function markedStringsEquals(a: MarkedString | MarkedString[], b: MarkedString | MarkedString[]): boolean {
-	if (!a && !b) {
+export class MarkdownString implements IMarkdownString {
+
+	value: string;
+	isTrusted?: boolean;
+
+	constructor(value: string = '') {
+		this.value = value;
+	}
+
+	appendText(value: string): MarkdownString {
+		// escape markdown syntax tokens: http://daringfireball.net/projects/markdown/syntax#backslash
+		this.value += value.replace(/[\\`*_{}[\]()#+\-.!]/g, '\\$&');
+		return this;
+	}
+
+	appendMarkdown(value: string): MarkdownString {
+		this.value += value;
+		return this;
+	}
+
+	appendCodeblock(langId: string, code: string): MarkdownString {
+		this.value += '\n```';
+		this.value += langId;
+		this.value += '\n';
+		this.value += code;
+		this.value += '\n```\n';
+		return this;
+	}
+}
+
+export function isEmptyMarkdownString(oneOrMany: IMarkdownString | IMarkdownString[] | null | undefined): boolean {
+	if (isMarkdownString(oneOrMany)) {
+		return !oneOrMany.value;
+	} else if (Array.isArray(oneOrMany)) {
+		return oneOrMany.every(isEmptyMarkdownString);
+	} else {
 		return true;
 	}
-	if (!a || !b) {
-		return false;
-	}
-
-	if (Array.isArray(a)) {
-		if (!Array.isArray(b)) {
-			return false;
-		}
-		return markedStringArrEquals(a, b);
-	}
-	return markedStringEqual(a, b as MarkedString);
 }
 
-
-function markedStringArrEquals(a: MarkedString[], b: MarkedString[]): boolean {
-	let aLen = a.length,
-		bLen = b.length;
-
-	if (aLen !== bLen) {
-		return false;
+export function isMarkdownString(thing: any): thing is IMarkdownString {
+	if (thing instanceof MarkdownString) {
+		return true;
+	} else if (thing && typeof thing === 'object') {
+		return typeof (<IMarkdownString>thing).value === 'string'
+			&& (typeof (<IMarkdownString>thing).isTrusted === 'boolean' || (<IMarkdownString>thing).isTrusted === undefined);
 	}
-
-	for (let i = 0; i < aLen; i++) {
-		if (!markedStringEqual(a[i], b[i])) {
-			return false;
-		}
-	}
-
-	return true;
+	return false;
 }
-function markedStringEqual(a: MarkedString, b: MarkedString): boolean {
+
+export function markedStringsEquals(a: IMarkdownString | IMarkdownString[], b: IMarkdownString | IMarkdownString[]): boolean {
 	if (!a && !b) {
 		return true;
-	}
-	if (!a || !b) {
+	} else if (!a || !b) {
+		return false;
+	} else if (Array.isArray(a) && Array.isArray(b)) {
+		return equals(a, b, markdownStringEqual);
+	} else if (isMarkdownString(a) && isMarkdownString(b)) {
+		return markdownStringEqual(a, b);
+	} else {
 		return false;
 	}
-	if (typeof a === 'string' || typeof b === 'string') {
-		return typeof a === 'string' && typeof b === 'string' && a === b;
-	}
-	return (
-		a.language === b.language
-		&& a.value === b.value
-	);
 }
 
-export function textToMarkedString(text: string): MarkedString {
-	return text.replace(/[\\`*_{}[\]()#+\-.!]/g, '\\$&'); // escape markdown syntax tokens: http://daringfireball.net/projects/markdown/syntax#backslash
+function markdownStringEqual(a: IMarkdownString, b: IMarkdownString): boolean {
+	if (a === b) {
+		return true;
+	} else if (!a || !b) {
+		return false;
+	} else {
+		return a.value === b.value && a.isTrusted === b.isTrusted;
+	}
 }
 
 export function removeMarkdownEscapes(text: string): string {
@@ -71,4 +91,26 @@ export function removeMarkdownEscapes(text: string): string {
 		return text;
 	}
 	return text.replace(/\\([\\`*_{}[\]()#+\-.!])/g, '$1');
+}
+
+export function parseHrefAndDimensions(href: string): { href: string, dimensions: string[] } {
+	const dimensions: string[] = [];
+	const splitted = href.split('|').map(s => s.trim());
+	href = splitted[0];
+	const parameters = splitted[1];
+	if (parameters) {
+		const heightFromParams = /height=(\d+)/.exec(parameters);
+		const widthFromParams = /width=(\d+)/.exec(parameters);
+		const height = heightFromParams ? heightFromParams[1] : '';
+		const width = widthFromParams ? widthFromParams[1] : '';
+		const widthIsFinite = isFinite(parseInt(width));
+		const heightIsFinite = isFinite(parseInt(height));
+		if (widthIsFinite) {
+			dimensions.push(`width="${width}"`);
+		}
+		if (heightIsFinite) {
+			dimensions.push(`height="${height}"`);
+		}
+	}
+	return { href, dimensions };
 }

@@ -2,17 +2,17 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-'use strict';
 
-import { createDecorator, ServiceIdentifier } from 'vs/platform/instantiation/common/instantiation';
-import { IEditorInput, ITextEditorOptions, IResourceInput } from 'vs/platform/editor/common/editor';
-import URI from 'vs/base/common/uri';
+import { createDecorator } from 'vs/platform/instantiation/common/instantiation';
+import { IResourceInput } from 'vs/platform/editor/common/editor';
+import { IEditorInput } from 'vs/workbench/common/editor';
+import { URI } from 'vs/base/common/uri';
 
 export const IHistoryService = createDecorator<IHistoryService>('historyService');
 
 export interface IHistoryService {
 
-	_serviceBrand: ServiceIdentifier<any>;
+	_serviceBrand: undefined;
 
 	/**
 	 * Re-opens the last closed editor if any.
@@ -20,9 +20,9 @@ export interface IHistoryService {
 	reopenLastClosedEditor(): void;
 
 	/**
-	 * Add an entry to the navigation stack of the history.
+	 * Navigates to the last location where an edit happened.
 	 */
-	add(input: IEditorInput, options?: ITextEditorOptions): void;
+	openLastEditLocation(): void;
 
 	/**
 	 * Navigate forwards in history.
@@ -41,6 +41,11 @@ export interface IHistoryService {
 	back(acrossEditors?: boolean): void;
 
 	/**
+	 * Navigate forward or backwards to previous entry in history.
+	 */
+	last(): void;
+
+	/**
 	 * Removes an entry from history.
 	 */
 	remove(input: IEditorInput | IResourceInput): void;
@@ -51,13 +56,27 @@ export interface IHistoryService {
 	clear(): void;
 
 	/**
+	 * Clear list of recently opened editors.
+	 */
+	clearRecentlyOpened(): void;
+
+	/**
 	 * Get the entire history of opened editors.
 	 */
-	getHistory(): (IEditorInput | IResourceInput)[];
+	getHistory(): Array<IEditorInput | IResourceInput>;
 
 	/**
 	 * Looking at the editor history, returns the workspace root of the last file that was
 	 * inside the workspace and part of the editor history.
+	 *
+	 * @param schemeFilter filter to restrict roots by scheme.
 	 */
-	getLastActiveWorkspaceRoot(): URI;
+	getLastActiveWorkspaceRoot(schemeFilter?: string): URI | undefined;
+
+	/**
+	 * Looking at the editor history, returns the resource of the last file that was opened.
+	 *
+	 * @param schemeFilter filter to restrict roots by scheme.
+	 */
+	getLastActiveFile(schemeFilter: string): URI | undefined;
 }
