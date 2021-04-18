@@ -15,8 +15,8 @@ import { ExtensionIdentifier, IExtensionDescription } from 'vs/platform/extensio
 import { ExtHostDocuments } from 'vs/workbench/api/common/extHostDocuments';
 import * as extHostTypeConverter from 'vs/workbench/api/common/extHostTypeConverters';
 import * as types from 'vs/workbench/api/common/extHostTypes';
-import * as vscode from 'vscode';
-import { ExtHostCommentsShape, IMainContext, MainContext, MainThreadCommentsShape } from './extHost.protocol';
+import type * as vscode from 'vscode';
+import { ExtHostCommentsShape, IMainContext, MainContext, MainThreadCommentsShape, CommentThreadChanges } from './extHost.protocol';
 import { ExtHostCommands } from './extHostCommands';
 
 type ProviderHandle = number;
@@ -213,11 +213,21 @@ export class ExtHostComments implements ExtHostCommentsShape, IDisposable {
 
 	}
 }
+type CommentThreadModification = Partial<{
+	range: vscode.Range,
+	label: string | undefined,
+	contextValue: string | undefined,
+	comments: vscode.Comment[],
+	collapsibleState: vscode.CommentThreadCollapsibleState
+	canReply: boolean;
+}>;
 
 export class ExtHostCommentThread implements vscode.CommentThread {
 	private static _handlePool: number = 0;
 	readonly handle = ExtHostCommentThread._handlePool++;
 	public commentHandle: number = 0;
+
+	private modifications: CommentThreadModification = Object.create(null);
 
 	set threadId(id: string) {
 		this._id = id;
@@ -239,18 +249,32 @@ export class ExtHostCommentThread implements vscode.CommentThread {
 		return this._uri;
 	}
 
-	private _onDidUpdateCommentThread = new Emitter<void>();
+	private readonly _onDidUpdateCommentThread = new Emitter<void>();
 	readonly onDidUpdateCommentThread = this._onDidUpdateCommentThread.event;
 
 	set range(range: vscode.Range) {
 		if (!range.isEqual(this._range)) {
 			this._range = range;
+			this.modifications.range = range;
 			this._onDidUpdateCommentThread.fire();
 		}
 	}
 
 	get range(): vscode.Range {
 		return this._range;
+	}
+
+	private _canReply: boolean = true;
+
+	set canReply(state: boolean) {
+		if (this._canReply !== state) {
+			this._canReply = state;
+			this.modifications.canReply = state;
+			this._onDidUpdateCommentThread.fire();
+		}
+	}
+	get canReply() {
+		return this._canReply;
 	}
 
 	private _label: string | undefined;
@@ -261,6 +285,7 @@ export class ExtHostCommentThread implements vscode.CommentThread {
 
 	set label(label: string | undefined) {
 		this._label = label;
+		this.modifications.label = label;
 		this._onDidUpdateCommentThread.fire();
 	}
 
@@ -272,6 +297,7 @@ export class ExtHostCommentThread implements vscode.CommentThread {
 
 	set contextValue(context: string | undefined) {
 		this._contextValue = context;
+		this.modifications.contextValue = context;
 		this._onDidUpdateCommentThread.fire();
 	}
 
@@ -281,6 +307,7 @@ export class ExtHostCommentThread implements vscode.CommentThread {
 
 	set comments(newComments: vscode.Comment[]) {
 		this._comments = newComments;
+		this.modifications.comments = newComments;
 		this._onDidUpdateCommentThread.fire();
 	}
 
@@ -292,6 +319,7 @@ export class ExtHostCommentThread implements vscode.CommentThread {
 
 	set collapsibleState(newState: vscode.CommentThreadCollapsibleState) {
 		this._collapseState = newState;
+		this.modifications.collapsibleState = newState;
 		this._onDidUpdateCommentThread.fire();
 	}
 
@@ -353,22 +381,37 @@ export class ExtHostCommentThread implements vscode.CommentThread {
 			this._acceptInputDisposables.value = new DisposableStore();
 		}
 
-		const commentThreadRange = extHostTypeConverter.Range.from(this._range);
-		const label = this.label;
-		const contextValue = this.contextValue;
-		const comments = this._comments.map(cmt => { return convertToModeComment(this, this._commentController, cmt, this._commentsMap); });
-		const collapsibleState = convertToCollapsibleState(this._collapseState);
+		const modified = (value: keyof CommentThreadModification): boolean =>
+			Object.prototype.hasOwnProperty.call(this.modifications, value);
+
+		const formattedModifications: CommentThreadChanges = {};
+		if (modified('range')) {
+			formattedModifications.range = extHostTypeConverter.Range.from(this._range);
+		}
+		if (modified('label')) {
+			formattedModifications.label = this.label;
+		}
+		if (modified('contextValue')) {
+			formattedModifications.contextValue = this.contextValue;
+		}
+		if (modified('comments')) {
+			formattedModifications.comments =
+				this._comments.map(cmt => convertToModeComment(this, this._commentController, cmt, this._commentsMap));
+		}
+		if (modified('collapsibleState')) {
+			formattedModifications.collapseState = convertToCollapsibleState(this._collapseState);
+		}
+		if (modified('canReply')) {
+			formattedModifications.canReply = this.canReply;
+		}
+		this.modifications = {};
 
 		this._proxy.$updateCommentThread(
 			this._commentController.handle,
 			this.handle,
 			this._id!,
 			this._uri,
-			commentThreadRange,
-			label,
-			contextValue,
-			comments,
-			collapsibleState
+			formattedModifications
 		);
 	}
 
@@ -423,6 +466,18 @@ class ExtHostCommentController implements vscode.CommentController {
 		this._reactionHandler = handler;
 
 		this._proxy.$updateCommentControllerFeatures(this.handle, { reactionHandler: !!handler });
+	}
+
+	private _options: modes.CommentOptions | undefined;
+
+	get options() {
+		return this._options;
+	}
+
+	set options(options: modes.CommentOptions | undefined) {
+		this._options = options;
+
+		this._proxy.$updateCommentControllerFeatures(this.handle, { options: this._options });
 	}
 
 	constructor(

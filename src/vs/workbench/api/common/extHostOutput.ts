@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { MainContext, MainThreadOutputServiceShape, ExtHostOutputServiceShape } from './extHost.protocol';
-import * as vscode from 'vscode';
+import type * as vscode from 'vscode';
 import { URI } from 'vs/base/common/uri';
 import { Event, Emitter } from 'vs/base/common/event';
 import { Disposable } from 'vs/base/common/lifecycle';
@@ -73,7 +73,7 @@ export abstract class AbstractExtHostOutputChannel extends Disposable implements
 		}
 	}
 
-	dispose(): void {
+	override dispose(): void {
 		super.dispose();
 
 		if (!this._disposed) {
@@ -90,7 +90,7 @@ export class ExtHostPushOutputChannel extends AbstractExtHostOutputChannel {
 		super(name, false, undefined, proxy);
 	}
 
-	append(value: string): void {
+	override append(value: string): void {
 		super.append(value);
 		this._id.then(id => this._proxy.$append(id, value));
 		this._onDidAppend.fire();
@@ -103,7 +103,7 @@ class ExtHostLogFileOutputChannel extends AbstractExtHostOutputChannel {
 		super(name, true, file, proxy);
 	}
 
-	append(value: string): void {
+	override append(value: string): void {
 		throw new Error('Not supported');
 	}
 }

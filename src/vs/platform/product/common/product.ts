@@ -3,120 +3,76 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { createDecorator } from 'vs/platform/instantiation/common/instantiation';
+import { FileAccess } from 'vs/base/common/network';
+import { isWeb, globals } from 'vs/base/common/platform';
+import { env } from 'vs/base/common/process';
+import { dirname, joinPath } from 'vs/base/common/resources';
+import { IProductConfiguration } from 'vs/base/common/product';
+import { ISandboxConfiguration } from 'vs/base/parts/sandbox/common/sandboxTypes';
 
-export const IProductService = createDecorator<IProductService>('productService');
+let product: IProductConfiguration;
 
-export interface IProductService extends Readonly<IProductConfiguration> {
-
-	_serviceBrand: undefined;
-
+// Native sandbox environment
+if (typeof globals.vscode !== 'undefined') {
+	const configuration: ISandboxConfiguration | undefined = globals.vscode.context.configuration();
+	if (configuration) {
+		product = configuration.product;
+	} else {
+		throw new Error('Sandbox: unable to resolve product configuration from preload script.');
+	}
 }
 
-export interface IProductConfiguration {
-	readonly version: string;
-	readonly date?: string;
-	readonly quality?: string;
-	readonly commit?: string;
+// Native node.js environment
+else if (typeof require?.__$__nodeRequire === 'function') {
 
-	readonly nameShort: string;
-	readonly nameLong: string;
+	// Obtain values from product.json and package.json
+	const rootPath = dirname(FileAccess.asFileUri('', require));
 
-	readonly win32AppUserModelId?: string;
-	readonly win32MutexName?: string;
-	readonly applicationName: string;
+	product = require.__$__nodeRequire(joinPath(rootPath, 'product.json').fsPath);
+	const pkg = require.__$__nodeRequire(joinPath(rootPath, 'package.json').fsPath) as { version: string; };
 
-	readonly urlProtocol: string;
-	readonly dataFolderName: string;
+	// Running out of sources
+	if (env['VSCODE_DEV']) {
+		Object.assign(product, {
+			nameShort: `${product.nameShort} Dev`,
+			nameLong: `${product.nameLong} Dev`,
+			dataFolderName: `${product.dataFolderName}-dev`
+		});
+	}
 
-	readonly downloadUrl?: string;
-	readonly updateUrl?: string;
-	readonly target?: string;
-
-	readonly settingsSearchBuildId?: number;
-	readonly settingsSearchUrl?: string;
-
-	readonly experimentsUrl?: string;
-
-	readonly extensionsGallery?: {
-		readonly serviceUrl: string;
-		readonly itemUrl: string;
-		readonly controlUrl: string;
-		readonly recommendationsUrl: string;
-	};
-
-	readonly extensionTips?: { [id: string]: string; };
-	readonly extensionImportantTips?: { [id: string]: { name: string; pattern: string; isExtensionPack?: boolean }; };
-	readonly exeBasedExtensionTips?: { [id: string]: IExeBasedExtensionTip; };
-	readonly extensionKeywords?: { [extension: string]: readonly string[]; };
-	readonly keymapExtensionTips?: readonly string[];
-
-	readonly crashReporter?: {
-		readonly companyName: string;
-		readonly productName: string;
-	};
-
-	readonly welcomePage?: string;
-
-	readonly enableTelemetry?: boolean;
-	readonly aiConfig?: {
-		readonly asimovKey: string;
-	};
-
-	readonly sendASmile?: {
-		readonly reportIssueUrl: string,
-		readonly requestFeatureUrl: string
-	};
-
-	readonly documentationUrl?: string;
-	readonly releaseNotesUrl?: string;
-	readonly keyboardShortcutsUrlMac?: string;
-	readonly keyboardShortcutsUrlLinux?: string;
-	readonly keyboardShortcutsUrlWin?: string;
-	readonly introductoryVideosUrl?: string;
-	readonly tipsAndTricksUrl?: string;
-	readonly newsletterSignupUrl?: string;
-	readonly twitterUrl?: string;
-	readonly requestFeatureUrl?: string;
-	readonly reportIssueUrl?: string;
-	readonly licenseUrl?: string;
-	readonly privacyStatementUrl?: string;
-	readonly telemetryOptOutUrl?: string;
-
-	readonly npsSurveyUrl?: string;
-	readonly surveys?: readonly ISurveyData[];
-
-	readonly checksums?: { [path: string]: string; };
-	readonly checksumFailMoreInfoUrl?: string;
-
-	readonly hockeyApp?: {
-		readonly 'win32-ia32': string;
-		readonly 'win32-x64': string;
-		readonly 'linux-x64': string;
-		readonly 'darwin': string;
-	};
-
-	readonly portable?: string;
-
-	readonly uiExtensions?: readonly string[];
-	readonly extensionAllowedProposedApi?: readonly string[];
-
-	readonly msftInternalDomains?: string[];
-	readonly linkProtectionTrustedDomains?: readonly string[];
+	Object.assign(product, {
+		version: pkg.version
+	});
 }
 
-export interface IExeBasedExtensionTip {
-	friendlyName: string;
-	windowsPath?: string;
-	recommendations: readonly string[];
-	important?: boolean;
-	exeFriendlyName?: string;
+// Web environment or unknown
+else {
+
+	// Built time configuration (do NOT modify)
+	product = { /*BUILD->INSERT_PRODUCT_CONFIGURATION*/ } as IProductConfiguration;
+
+	// Running out of sources
+	if (Object.keys(product).length === 0) {
+		Object.assign(product, {
+			version: '1.56.0-dev',
+			nameShort: isWeb ? 'Code Web - OSS Dev' : 'Code - OSS Dev',
+			nameLong: isWeb ? 'Code Web - OSS Dev' : 'Code - OSS Dev',
+			applicationName: 'code-oss',
+			dataFolderName: '.vscode-oss',
+			urlProtocol: 'code-oss',
+			reportIssueUrl: 'https://github.com/microsoft/vscode/issues/new',
+			licenseName: 'MIT',
+			licenseUrl: 'https://github.com/microsoft/vscode/blob/main/LICENSE.txt',
+			extensionAllowedProposedApi: [
+				'ms-vscode.vscode-js-profile-flame',
+				'ms-vscode.vscode-js-profile-table',
+				'ms-vscode.github-browser',
+				'ms-vscode.github-richnav',
+				'ms-vscode.remotehub',
+				'ms-vscode.remotehub-insiders'
+			],
+		});
+	}
 }
 
-export interface ISurveyData {
-	surveyId: string;
-	surveyUrl: string;
-	languageId: string;
-	editCount: number;
-	userProbability: number;
-}
+export default product;

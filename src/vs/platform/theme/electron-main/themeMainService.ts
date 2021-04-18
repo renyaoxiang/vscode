@@ -4,8 +4,8 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { isWindows, isMacintosh } from 'vs/base/common/platform';
-import { systemPreferences, ipcMain as ipc } from 'electron';
-import { IStateService } from 'vs/platform/state/common/state';
+import { ipcMain, nativeTheme } from 'electron';
+import { IStateService } from 'vs/platform/state/node/state';
 import { createDecorator } from 'vs/platform/instantiation/common/instantiation';
 
 const DEFAULT_BG_LIGHT = '#FFFFFF';
@@ -18,17 +18,17 @@ const THEME_BG_STORAGE_KEY = 'themeBackground';
 export const IThemeMainService = createDecorator<IThemeMainService>('themeMainService');
 
 export interface IThemeMainService {
-	_serviceBrand: undefined;
+	readonly _serviceBrand: undefined;
 
 	getBackgroundColor(): string;
 }
 
 export class ThemeMainService implements IThemeMainService {
 
-	_serviceBrand: undefined;
+	declare readonly _serviceBrand: undefined;
 
 	constructor(@IStateService private stateService: IStateService) {
-		ipc.on('vscode:changeColorTheme', (e: Event, windowId: number, broadcast: string) => {
+		ipcMain.on('vscode:changeColorTheme', (e: Event, windowId: number, broadcast: string) => {
 			// Theme changes
 			if (typeof broadcast === 'string') {
 				this.storeBackgroundColor(JSON.parse(broadcast));
@@ -41,15 +41,15 @@ export class ThemeMainService implements IThemeMainService {
 		this.stateService.setItem(THEME_BG_STORAGE_KEY, data.background);
 	}
 
-	public getBackgroundColor(): string {
-		if (isWindows && systemPreferences.isInvertedColorScheme()) {
+	getBackgroundColor(): string {
+		if ((isWindows || isMacintosh) && nativeTheme.shouldUseInvertedColorScheme) {
 			return DEFAULT_BG_HC_BLACK;
 		}
 
 		let background = this.stateService.getItem<string | null>(THEME_BG_STORAGE_KEY, null);
 		if (!background) {
 			let baseTheme: string;
-			if (isWindows && systemPreferences.isInvertedColorScheme()) {
+			if ((isWindows || isMacintosh) && nativeTheme.shouldUseInvertedColorScheme) {
 				baseTheme = 'hc-black';
 			} else {
 				baseTheme = this.stateService.getItem<string>(THEME_STORAGE_KEY, 'vs-dark').split(' ')[0];

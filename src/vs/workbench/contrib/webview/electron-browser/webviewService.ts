@@ -6,36 +6,40 @@
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 import { DynamicWebviewEditorOverlay } from 'vs/workbench/contrib/webview/browser/dynamicWebviewEditorOverlay';
-import { IFrameWebview } from 'vs/workbench/contrib/webview/browser/webviewElement';
-import { IWebviewService, WebviewContentOptions, WebviewEditorOverlay, WebviewElement, WebviewOptions } from 'vs/workbench/contrib/webview/browser/webview';
+import { WebviewContentOptions, WebviewElement, WebviewExtensionDescription, WebviewOptions, WebviewOverlay } from 'vs/workbench/contrib/webview/browser/webview';
+import { WebviewService } from 'vs/workbench/contrib/webview/browser/webviewService';
+import { ElectronIframeWebview } from 'vs/workbench/contrib/webview/electron-sandbox/iframeWebviewElement';
 import { ElectronWebviewBasedWebview } from 'vs/workbench/contrib/webview/electron-browser/webviewElement';
 
-export class ElectronWebviewService implements IWebviewService {
-	_serviceBrand: undefined;
+export class ElectronWebviewService extends WebviewService {
 
 	constructor(
-		@IInstantiationService private readonly _instantiationService: IInstantiationService,
+		@IInstantiationService instantiationService: IInstantiationService,
 		@IConfigurationService private readonly _configService: IConfigurationService,
-	) { }
-
-	createWebview(
-		id: string,
-		options: WebviewOptions,
-		contentOptions: WebviewContentOptions
-	): WebviewElement {
-		const useExternalEndpoint = this._configService.getValue<string>('webview.experimental.useExternalEndpoint');
-		if (useExternalEndpoint) {
-			return this._instantiationService.createInstance(IFrameWebview, id, options, contentOptions);
-		} else {
-			return this._instantiationService.createInstance(ElectronWebviewBasedWebview, options, contentOptions);
-		}
+	) {
+		super(instantiationService);
 	}
 
-	createWebviewEditorOverlay(
+	override createWebviewElement(
 		id: string,
 		options: WebviewOptions,
 		contentOptions: WebviewContentOptions,
-	): WebviewEditorOverlay {
-		return this._instantiationService.createInstance(DynamicWebviewEditorOverlay, id, options, contentOptions);
+		extension: WebviewExtensionDescription | undefined,
+	): WebviewElement {
+		const useIframes = this._configService.getValue<string>('webview.experimental.useIframes') ?? !options.enableFindWidget;
+		const webview = this._instantiationService.createInstance(useIframes ? ElectronIframeWebview : ElectronWebviewBasedWebview, id, options, contentOptions, extension, this._webviewThemeDataProvider);
+		this.addWebviewListeners(webview);
+		return webview;
+	}
+
+	override createWebviewOverlay(
+		id: string,
+		options: WebviewOptions,
+		contentOptions: WebviewContentOptions,
+		extension: WebviewExtensionDescription | undefined,
+	): WebviewOverlay {
+		const webview = this._instantiationService.createInstance(DynamicWebviewEditorOverlay, id, options, contentOptions, extension);
+		this.addWebviewListeners(webview);
+		return webview;
 	}
 }

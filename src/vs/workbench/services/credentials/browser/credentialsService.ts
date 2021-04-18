@@ -3,25 +3,24 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { ICredentialsService } from 'vs/workbench/services/credentials/common/credentials';
+import { ICredentialsService, ICredentialsProvider, ICredentialsChangeEvent } from 'vs/workbench/services/credentials/common/credentials';
 import { registerSingleton } from 'vs/platform/instantiation/common/extensions';
 import { IWorkbenchEnvironmentService } from 'vs/workbench/services/environment/common/environmentService';
+import { Emitter } from 'vs/base/common/event';
+import { Disposable } from 'vs/base/common/lifecycle';
 
-export interface ICredentialsProvider {
-	getPassword(service: string, account: string): Promise<string | null>;
-	setPassword(service: string, account: string, password: string): Promise<void>;
-	deletePassword(service: string, account: string): Promise<boolean>;
-	findPassword(service: string): Promise<string | null>;
-	findCredentials(service: string): Promise<Array<{ account: string, password: string }>>;
-}
+export class BrowserCredentialsService extends Disposable implements ICredentialsService {
 
-export class BrowserCredentialsService implements ICredentialsService {
+	declare readonly _serviceBrand: undefined;
 
-	_serviceBrand: undefined;
+	private _onDidChangePassword = this._register(new Emitter<ICredentialsChangeEvent>());
+	readonly onDidChangePassword = this._onDidChangePassword.event;
 
 	private credentialsProvider: ICredentialsProvider;
 
 	constructor(@IWorkbenchEnvironmentService environmentService: IWorkbenchEnvironmentService) {
+		super();
+
 		if (environmentService.options && environmentService.options.credentialsProvider) {
 			this.credentialsProvider = environmentService.options.credentialsProvider;
 		} else {
@@ -33,19 +32,24 @@ export class BrowserCredentialsService implements ICredentialsService {
 		return this.credentialsProvider.getPassword(service, account);
 	}
 
-	setPassword(service: string, account: string, password: string): Promise<void> {
-		return this.credentialsProvider.setPassword(service, account, password);
+	async setPassword(service: string, account: string, password: string): Promise<void> {
+		await this.credentialsProvider.setPassword(service, account, password);
+
+		this._onDidChangePassword.fire({ service, account });
 	}
 
 	deletePassword(service: string, account: string): Promise<boolean> {
-		return this.credentialsProvider.deletePassword(service, account);
+		const didDelete = this.credentialsProvider.deletePassword(service, account);
+		this._onDidChangePassword.fire({ service, account });
+
+		return didDelete;
 	}
 
 	findPassword(service: string): Promise<string | null> {
 		return this.credentialsProvider.findPassword(service);
 	}
 
-	findCredentials(service: string): Promise<Array<{ account: string, password: string }>> {
+	findCredentials(service: string): Promise<Array<{ account: string, password: string; }>> {
 		return this.credentialsProvider.findCredentials(service);
 	}
 }
@@ -86,17 +90,12 @@ class InMemoryCredentialsProvider implements ICredentialsProvider {
 		return credential ? credential.password : null;
 	}
 
-	private doFindPassword(service: string, account?: string): ICredential | null {
-		for (const credential of this.credentials) {
-			if (credential.service === service && (typeof account !== 'string' || credential.account === account)) {
-				return credential;
-			}
-		}
-
-		return null;
+	private doFindPassword(service: string, account?: string): ICredential | undefined {
+		return this.credentials.find(credential =>
+			credential.service === service && (typeof account !== 'string' || credential.account === account));
 	}
 
-	async findCredentials(service: string): Promise<Array<{ account: string, password: string }>> {
+	async findCredentials(service: string): Promise<Array<{ account: string, password: string; }>> {
 		return this.credentials
 			.filter(credential => credential.service === service)
 			.map(({ account, password }) => ({ account, password }));

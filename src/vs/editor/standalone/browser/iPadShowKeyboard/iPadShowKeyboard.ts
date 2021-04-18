@@ -14,7 +14,7 @@ import { EditorOption } from 'vs/editor/common/config/editorOptions';
 
 export class IPadShowKeyboard extends Disposable implements IEditorContribution {
 
-	private static readonly ID = 'editor.contrib.iPadShowKeyboard';
+	public static readonly ID = 'editor.contrib.iPadShowKeyboard';
 
 	private readonly editor: ICodeEditor;
 	private widget: ShowKeyboardWidget | null;
@@ -44,11 +44,7 @@ export class IPadShowKeyboard extends Disposable implements IEditorContribution 
 		}
 	}
 
-	public getId(): string {
-		return IPadShowKeyboard.ID;
-	}
-
-	public dispose(): void {
+	public override dispose(): void {
 		super.dispose();
 		if (this.widget) {
 			this.widget.dispose();
@@ -81,7 +77,7 @@ class ShowKeyboardWidget extends Disposable implements IOverlayWidget {
 		this.editor.addOverlayWidget(this);
 	}
 
-	public dispose(): void {
+	public override dispose(): void {
 		this.editor.removeOverlayWidget(this);
 		super.dispose();
 	}
@@ -103,4 +99,4 @@ class ShowKeyboardWidget extends Disposable implements IOverlayWidget {
 	}
 }
 
-registerEditorContribution(IPadShowKeyboard);
+registerEditorContribution(IPadShowKeyboard.ID, IPadShowKeyboard);

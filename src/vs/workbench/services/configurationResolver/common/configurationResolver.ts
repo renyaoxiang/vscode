@@ -6,21 +6,45 @@
 import { IStringDictionary } from 'vs/base/common/collections';
 import { createDecorator } from 'vs/platform/instantiation/common/instantiation';
 import { IWorkspaceFolder } from 'vs/platform/workspace/common/workspace';
+import { ConfigurationTarget } from 'vs/platform/configuration/common/configuration';
+import { IProcessEnvironment } from 'vs/base/common/platform';
 
 export const IConfigurationResolverService = createDecorator<IConfigurationResolverService>('configurationResolverService');
 
 export interface IConfigurationResolverService {
-	_serviceBrand: undefined;
+	readonly _serviceBrand: undefined;
 
+	/**
+	 * @deprecated Use the async version of `resolve` instead.
+	 */
 	resolve(folder: IWorkspaceFolder | undefined, value: string): string;
+	/**
+	 * @deprecated Use the async version of `resolve` instead.
+	 */
 	resolve(folder: IWorkspaceFolder | undefined, value: string[]): string[];
+	/**
+	 * @deprecated Use the async version of `resolve` instead.
+	 */
 	resolve(folder: IWorkspaceFolder | undefined, value: IStringDictionary<string>): IStringDictionary<string>;
 
 	/**
 	 * Recursively resolves all variables in the given config and returns a copy of it with substituted values.
 	 * Command variables are only substituted if a "commandValueMapping" dictionary is given and if it contains an entry for the command.
+	 * @deprecated Use the async version of `resolveAny` instead.
 	 */
-	resolveAny(folder: IWorkspaceFolder | undefined, config: any, commandValueMapping?: IStringDictionary<string>): Promise<any>;
+	resolveAny(folder: IWorkspaceFolder | undefined, config: any, commandValueMapping?: IStringDictionary<string>): any;
+
+	resolveWithEnvironment(environment: IProcessEnvironment, folder: IWorkspaceFolder | undefined, value: string): string;
+
+	resolveAsync(folder: IWorkspaceFolder | undefined, value: string): Promise<string>;
+	resolveAsync(folder: IWorkspaceFolder | undefined, value: string[]): Promise<string[]>;
+	resolveAsync(folder: IWorkspaceFolder | undefined, value: IStringDictionary<string>): Promise<IStringDictionary<string>>;
+
+	/**
+	 * Recursively resolves all variables in the given config and returns a copy of it with substituted values.
+	 * Command variables are only substituted if a "commandValueMapping" dictionary is given and if it contains an entry for the command.
+	 */
+	resolveAnyAsync(folder: IWorkspaceFolder | undefined, config: any, commandValueMapping?: IStringDictionary<string>): Promise<any>;
 
 	/**
 	 * Recursively resolves all variables (including commands and user input) in the given config and returns a copy of it with substituted values.
@@ -29,13 +53,13 @@ export interface IConfigurationResolverService {
 	 * @param section For example, 'tasks' or 'debug'. Used for resolving inputs.
 	 * @param variables Aliases for commands.
 	 */
-	resolveWithInteractionReplace(folder: IWorkspaceFolder | undefined, config: any, section?: string, variables?: IStringDictionary<string>): Promise<any>;
+	resolveWithInteractionReplace(folder: IWorkspaceFolder | undefined, config: any, section?: string, variables?: IStringDictionary<string>, target?: ConfigurationTarget): Promise<any>;
 
 	/**
 	 * Similar to resolveWithInteractionReplace, except without the replace. Returns a map of variables and their resolution.
 	 * Keys in the map will be of the format input:variableName or command:variableName.
 	 */
-	resolveWithInteraction(folder: IWorkspaceFolder | undefined, config: any, section?: string, variables?: IStringDictionary<string>): Promise<Map<string, string> | undefined>;
+	resolveWithInteraction(folder: IWorkspaceFolder | undefined, config: any, section?: string, variables?: IStringDictionary<string>, target?: ConfigurationTarget): Promise<Map<string, string> | undefined>;
 
 	/**
 	 * Contributes a variable that can be resolved later. Consumers that use resolveAny, resolveWithInteraction,
@@ -49,13 +73,14 @@ export interface PromptStringInputInfo {
 	type: 'promptString';
 	description: string;
 	default?: string;
+	password?: boolean;
 }
 
 export interface PickStringInputInfo {
 	id: string;
 	type: 'pickString';
 	description: string;
-	options: string[];
+	options: (string | { value: string, label?: string })[];
 	default?: string;
 }
 

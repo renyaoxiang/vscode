@@ -7,11 +7,10 @@ import 'vs/css!./gridview';
 import { Orientation } from 'vs/base/browser/ui/sash/sash';
 import { Disposable } from 'vs/base/common/lifecycle';
 import { tail2 as tail, equals } from 'vs/base/common/arrays';
-import { orthogonal, IView as IGridViewView, GridView, Sizing as GridViewSizing, Box, IGridViewStyles, IViewSize, IGridViewOptions } from './gridview';
+import { orthogonal, IView as IGridViewView, GridView, Sizing as GridViewSizing, Box, IGridViewStyles, IViewSize, IGridViewOptions, IBoundarySashes } from './gridview';
 import { Event } from 'vs/base/common/event';
-import { InvisibleSizing } from 'vs/base/browser/ui/splitview/splitview';
 
-export { Orientation, Sizing as GridViewSizing, IViewSize, orthogonal, LayoutPriority } from './gridview';
+export { Orientation, IViewSize, orthogonal, LayoutPriority } from './gridview';
 
 export const enum Direction {
 	Up,
@@ -176,7 +175,7 @@ function getGridLocation(element: HTMLElement): number[] {
 	}
 
 	const index = indexInParent(parentElement);
-	const ancestor = parentElement.parentElement!.parentElement!.parentElement!;
+	const ancestor = parentElement.parentElement!.parentElement!.parentElement!.parentElement!;
 	return [...getGridLocation(ancestor), index];
 }
 
@@ -212,6 +211,11 @@ export class Grid<T extends IView = IView> extends Disposable {
 	get maximumWidth(): number { return this.gridview.maximumWidth; }
 	get maximumHeight(): number { return this.gridview.maximumHeight; }
 	get onDidChange(): Event<{ width: number; height: number; } | undefined> { return this.gridview.onDidChange; }
+
+	get boundarySashes(): IBoundarySashes { return this.gridview.boundarySashes; }
+	set boundarySashes(boundarySashes: IBoundarySashes) { this.gridview.boundarySashes = boundarySashes; }
+
+	set edgeSnapping(edgeSnapping: boolean) { this.gridview.edgeSnapping = edgeSnapping; }
 
 	get element(): HTMLElement { return this.gridview.element; }
 
@@ -517,51 +521,6 @@ export class SerializableGrid<T extends ISerializableView> extends Grid<T> {
 		return { type: 'branch', data: node.children.map(c => SerializableGrid.serializeNode(c, orthogonal(orientation))), size };
 	}
 
-	private static deserializeNode<T extends ISerializableView>(json: ISerializedNode, orientation: Orientation, box: Box, deserializer: IViewDeserializer<T>): GridNode<T> {
-		if (!json || typeof json !== 'object') {
-			throw new Error('Invalid JSON');
-		}
-
-		if (json.type === 'branch') {
-			if (!Array.isArray(json.data)) {
-				throw new Error('Invalid JSON: \'data\' property of branch must be an array.');
-			}
-
-			const children: GridNode<T>[] = [];
-			let offset = 0;
-
-			for (const child of json.data) {
-				if (typeof child.size !== 'number') {
-					throw new Error('Invalid JSON: \'size\' property of node must be a number.');
-				}
-
-				const childSize = child.type === 'leaf' && child.visible === false ? 0 : child.size;
-				const childBox: Box = orientation === Orientation.HORIZONTAL
-					? { top: box.top, left: box.left + offset, width: childSize, height: box.height }
-					: { top: box.top + offset, left: box.left, width: box.width, height: childSize };
-
-				children.push(SerializableGrid.deserializeNode(child, orthogonal(orientation), childBox, deserializer));
-				offset += childSize;
-			}
-
-			return { children, box };
-
-		} else if (json.type === 'leaf') {
-			const view: T = deserializer.fromJSON(json.data);
-			return { view, box, cachedVisibleSize: json.visible === false ? json.size : undefined };
-		}
-
-		throw new Error('Invalid JSON: \'type\' property must be either \'branch\' or \'leaf\'.');
-	}
-
-	private static getFirstLeaf<T extends IView>(node: GridNode<T>): GridLeafNode<T> {
-		if (!isGridBranchNode(node)) {
-			return node;
-		}
-
-		return SerializableGrid.getFirstLeaf(node.children[0]);
-	}
-
 	static deserialize<T extends ISerializableView>(json: ISerializedGrid, deserializer: IViewDeserializer<T>, options: IGridOptions = {}): SerializableGrid<T> {
 		if (typeof json.orientation !== 'number') {
 			throw new Error('Invalid JSON: \'orientation\' property must be a number.');
@@ -592,7 +551,7 @@ export class SerializableGrid<T extends ISerializableView> extends Grid<T> {
 		};
 	}
 
-	layout(width: number, height: number): void {
+	override layout(width: number, height: number): void {
 		super.layout(width, height);
 
 		if (this.initialLayoutContext) {
@@ -605,8 +564,8 @@ export class SerializableGrid<T extends ISerializableView> extends Grid<T> {
 export type GridNodeDescriptor = { size?: number, groups?: GridNodeDescriptor[] };
 export type GridDescriptor = { orientation: Orientation, groups?: GridNodeDescriptor[] };
 
-export function sanitizeGridNodeDescriptor(nodeDescriptor: GridNodeDescriptor): void {
-	if (nodeDescriptor.groups && nodeDescriptor.groups.length === 0) {
+export function sanitizeGridNodeDescriptor(nodeDescriptor: GridNodeDescriptor, rootNode: boolean): void {
+	if (!rootNode && nodeDescriptor.groups && nodeDescriptor.groups.length <= 1) {
 		nodeDescriptor.groups = undefined;
 	}
 
@@ -618,7 +577,7 @@ export function sanitizeGridNodeDescriptor(nodeDescriptor: GridNodeDescriptor): 
 	let totalDefinedSizeCount = 0;
 
 	for (const child of nodeDescriptor.groups) {
-		sanitizeGridNodeDescriptor(child);
+		sanitizeGridNodeDescriptor(child, false);
 
 		if (child.size) {
 			totalDefinedSize += child.size;
@@ -666,7 +625,7 @@ function getDimensions(node: ISerializedNode, orientation: Orientation): { width
 }
 
 export function createSerializedGrid(gridDescriptor: GridDescriptor): ISerializedGrid {
-	sanitizeGridNodeDescriptor(gridDescriptor);
+	sanitizeGridNodeDescriptor(gridDescriptor, true);
 
 	const root = createSerializedNode(gridDescriptor);
 	const { width, height } = getDimensions(root, gridDescriptor.orientation);

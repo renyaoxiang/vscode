@@ -3,16 +3,39 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { IWorkbenchConstructionOptions, create } from 'vs/workbench/workbench.web.api';
-import { IURLCallbackProvider } from 'vs/workbench/services/url/browser/urlService';
-import { Event, Emitter } from 'vs/base/common/event';
+import { IWorkbenchConstructionOptions, create, ICredentialsProvider, IURLCallbackProvider, IWorkspaceProvider, IWorkspace, IWindowIndicator, IHomeIndicator, IProductQualityChangeHandler, ISettingsSyncOptions } from 'vs/workbench/workbench.web.api';
 import { URI, UriComponents } from 'vs/base/common/uri';
+import { Event, Emitter } from 'vs/base/common/event';
 import { generateUuid } from 'vs/base/common/uuid';
 import { CancellationToken } from 'vs/base/common/cancellation';
 import { streamToBuffer } from 'vs/base/common/buffer';
 import { Disposable } from 'vs/base/common/lifecycle';
 import { request } from 'vs/base/parts/request/browser/request';
-import { ICredentialsProvider } from 'vs/workbench/services/credentials/browser/credentialsService';
+import { isFolderToOpen, isWorkspaceToOpen } from 'vs/platform/windows/common/windows';
+import { isEqual } from 'vs/base/common/resources';
+import { isStandalone } from 'vs/base/browser/browser';
+import { localize } from 'vs/nls';
+import { Schemas } from 'vs/base/common/network';
+import product from 'vs/platform/product/common/product';
+import { parseLogLevel } from 'vs/platform/log/common/log';
+
+function doCreateUri(path: string, queryValues: Map<string, string>): URI {
+	let query: string | undefined = undefined;
+
+	if (queryValues) {
+		let index = 0;
+		queryValues.forEach((value, key) => {
+			if (!query) {
+				query = '';
+			}
+
+			const prefix = (index++ === 0) ? '' : '&';
+			query += `${prefix}${key}=${encodeURIComponent(value)}`;
+		});
+	}
+
+	return URI.parse(window.location.href).with({ path, query });
+}
 
 interface ICredential {
 	service: string;
@@ -24,7 +47,33 @@ class LocalStorageCredentialsProvider implements ICredentialsProvider {
 
 	static readonly CREDENTIALS_OPENED_KEY = 'credentials.provider';
 
-	private _credentials: ICredential[];
+	private readonly authService: string | undefined;
+
+	constructor() {
+		let authSessionInfo: { readonly id: string, readonly accessToken: string, readonly providerId: string, readonly canSignOut?: boolean, readonly scopes: string[][] } | undefined;
+		const authSessionElement = document.getElementById('vscode-workbench-auth-session');
+		const authSessionElementAttribute = authSessionElement ? authSessionElement.getAttribute('data-settings') : undefined;
+		if (authSessionElementAttribute) {
+			try {
+				authSessionInfo = JSON.parse(authSessionElementAttribute);
+			} catch (error) { /* Invalid session is passed. Ignore. */ }
+		}
+
+		if (authSessionInfo) {
+			// Settings Sync Entry
+			this.setPassword(`${product.urlProtocol}.login`, 'account', JSON.stringify(authSessionInfo));
+
+			// Auth extension Entry
+			this.authService = `${product.urlProtocol}-${authSessionInfo.providerId}.login`;
+			this.setPassword(this.authService, 'account', JSON.stringify(authSessionInfo.scopes.map(scopes => ({
+				id: authSessionInfo!.id,
+				scopes,
+				accessToken: authSessionInfo!.accessToken
+			}))));
+		}
+	}
+
+	private _credentials: ICredential[] | undefined;
 	private get credentials(): ICredential[] {
 		if (!this._credentials) {
 			try {
@@ -65,14 +114,39 @@ class LocalStorageCredentialsProvider implements ICredentialsProvider {
 	}
 
 	async setPassword(service: string, account: string, password: string): Promise<void> {
-		this.deletePassword(service, account);
+		this.doDeletePassword(service, account);
 
 		this.credentials.push({ service, account, password });
 
 		this.save();
+
+		try {
+			if (password && service === this.authService) {
+				const value = JSON.parse(password);
+				if (Array.isArray(value) && value.length === 0) {
+					await this.logout(service);
+				}
+			}
+		} catch (error) {
+			console.log(error);
+		}
 	}
 
 	async deletePassword(service: string, account: string): Promise<boolean> {
+		const result = await this.doDeletePassword(service, account);
+
+		if (result && service === this.authService) {
+			try {
+				await this.logout(service);
+			} catch (error) {
+				console.log(error);
+			}
+		}
+
+		return result;
+	}
+
+	private async doDeletePassword(service: string, account: string): Promise<boolean> {
 		let found = false;
 
 		this._credentials = this.credentials.filter(credential => {
@@ -101,14 +175,24 @@ class LocalStorageCredentialsProvider implements ICredentialsProvider {
 			.filter(credential => credential.service === service)
 			.map(({ account, password }) => ({ account, password }));
 	}
+
+	private async logout(service: string): Promise<void> {
+		const queryValues: Map<string, string> = new Map();
+		queryValues.set('logout', String(true));
+		queryValues.set('service', service);
+
+		await request({
+			url: doCreateUri('/auth/logout', queryValues).toString(true)
+		}, CancellationToken.None);
+	}
 }
 
 class PollingURLCallbackProvider extends Disposable implements IURLCallbackProvider {
 
-	static FETCH_INTERVAL = 500; 			// fetch every 500ms
-	static FETCH_TIMEOUT = 5 * 60 * 1000; 	// ...but stop after 5min
+	static readonly FETCH_INTERVAL = 500; 			// fetch every 500ms
+	static readonly FETCH_TIMEOUT = 5 * 60 * 1000; 	// ...but stop after 5min
 
-	static QUERY_KEYS = {
+	static readonly QUERY_KEYS = {
 		REQUEST_ID: 'vscode-requestId',
 		SCHEME: 'vscode-scheme',
 		AUTHORITY: 'vscode-authority',
@@ -117,8 +201,8 @@ class PollingURLCallbackProvider extends Disposable implements IURLCallbackProvi
 		FRAGMENT: 'vscode-fragment'
 	};
 
-	private readonly _onCallback: Emitter<URI> = this._register(new Emitter<URI>());
-	readonly onCallback: Event<URI> = this._onCallback.event;
+	private readonly _onCallback = this._register(new Emitter<URI>());
+	readonly onCallback = this._onCallback.event;
 
 	create(options?: Partial<UriComponents>): URI {
 		const queryValues: Map<string, string> = new Map();
@@ -151,7 +235,7 @@ class PollingURLCallbackProvider extends Disposable implements IURLCallbackProvi
 		// Start to poll on the callback being fired
 		this.periodicFetchCallback(requestId, Date.now());
 
-		return this.doCreateUri('/callback', queryValues);
+		return doCreateUri('/callback', queryValues);
 	}
 
 	private async periodicFetchCallback(requestId: string, startTime: number): Promise<void> {
@@ -161,7 +245,7 @@ class PollingURLCallbackProvider extends Disposable implements IURLCallbackProvi
 		queryValues.set(PollingURLCallbackProvider.QUERY_KEYS.REQUEST_ID, requestId);
 
 		const result = await request({
-			url: this.doCreateUri('/fetch-callback', queryValues).toString(true)
+			url: doCreateUri('/fetch-callback', queryValues).toString(true)
 		}, CancellationToken.None);
 
 		// Check for callback results
@@ -181,28 +265,270 @@ class PollingURLCallbackProvider extends Disposable implements IURLCallbackProvi
 			setTimeout(() => this.periodicFetchCallback(requestId, startTime), PollingURLCallbackProvider.FETCH_INTERVAL);
 		}
 	}
+}
 
-	private doCreateUri(path: string, queryValues: Map<string, string>): URI {
-		let query: string | undefined = undefined;
+class WorkspaceProvider implements IWorkspaceProvider {
 
-		if (queryValues) {
-			let index = 0;
-			queryValues.forEach((value, key) => {
-				if (!query) {
-					query = '';
-				}
+	static QUERY_PARAM_EMPTY_WINDOW = 'ew';
+	static QUERY_PARAM_FOLDER = 'folder';
+	static QUERY_PARAM_WORKSPACE = 'workspace';
 
-				const prefix = (index++ === 0) ? '' : '&';
-				query += `${prefix}${key}=${encodeURIComponent(value)}`;
-			});
+	static QUERY_PARAM_PAYLOAD = 'payload';
+
+	readonly trusted = true;
+
+	constructor(
+		public readonly workspace: IWorkspace,
+		public readonly payload: object
+	) { }
+
+	async open(workspace: IWorkspace, options?: { reuse?: boolean, payload?: object }): Promise<void> {
+		if (options?.reuse && !options.payload && this.isSame(this.workspace, workspace)) {
+			return; // return early if workspace and environment is not changing and we are reusing window
 		}
 
-		return URI.parse(window.location.href).with({ path, query });
+		const targetHref = this.createTargetUrl(workspace, options);
+		if (targetHref) {
+			if (options?.reuse) {
+				window.location.href = targetHref;
+			} else {
+				if (isStandalone) {
+					window.open(targetHref, '_blank', 'toolbar=no'); // ensures to open another 'standalone' window!
+				} else {
+					window.open(targetHref);
+				}
+			}
+		}
+	}
+
+	private createTargetUrl(workspace: IWorkspace, options?: { reuse?: boolean, payload?: object }): string | undefined {
+
+		// Empty
+		let targetHref: string | undefined = undefined;
+		if (!workspace) {
+			targetHref = `${document.location.origin}${document.location.pathname}?${WorkspaceProvider.QUERY_PARAM_EMPTY_WINDOW}=true`;
+		}
+
+		// Folder
+		else if (isFolderToOpen(workspace)) {
+			targetHref = `${document.location.origin}${document.location.pathname}?${WorkspaceProvider.QUERY_PARAM_FOLDER}=${encodeURIComponent(workspace.folderUri.toString())}`;
+		}
+
+		// Workspace
+		else if (isWorkspaceToOpen(workspace)) {
+			targetHref = `${document.location.origin}${document.location.pathname}?${WorkspaceProvider.QUERY_PARAM_WORKSPACE}=${encodeURIComponent(workspace.workspaceUri.toString())}`;
+		}
+
+		// Append payload if any
+		if (options?.payload) {
+			targetHref += `&${WorkspaceProvider.QUERY_PARAM_PAYLOAD}=${encodeURIComponent(JSON.stringify(options.payload))}`;
+		}
+
+		return targetHref;
+	}
+
+	private isSame(workspaceA: IWorkspace, workspaceB: IWorkspace): boolean {
+		if (!workspaceA || !workspaceB) {
+			return workspaceA === workspaceB; // both empty
+		}
+
+		if (isFolderToOpen(workspaceA) && isFolderToOpen(workspaceB)) {
+			return isEqual(workspaceA.folderUri, workspaceB.folderUri); // same workspace
+		}
+
+		if (isWorkspaceToOpen(workspaceA) && isWorkspaceToOpen(workspaceB)) {
+			return isEqual(workspaceA.workspaceUri, workspaceB.workspaceUri); // same workspace
+		}
+
+		return false;
+	}
+
+	hasRemote(): boolean {
+		if (this.workspace) {
+			if (isFolderToOpen(this.workspace)) {
+				return this.workspace.folderUri.scheme === Schemas.vscodeRemote;
+			}
+
+			if (isWorkspaceToOpen(this.workspace)) {
+				return this.workspace.workspaceUri.scheme === Schemas.vscodeRemote;
+			}
+		}
+
+		return true;
 	}
 }
 
-const options: IWorkbenchConstructionOptions = JSON.parse(document.getElementById('vscode-workbench-web-configuration')!.getAttribute('data-settings')!);
-options.urlCallbackProvider = new PollingURLCallbackProvider();
-options.credentialsProvider = new LocalStorageCredentialsProvider();
+class WindowIndicator implements IWindowIndicator {
 
-create(document.body, options);
+	readonly onDidChange = Event.None;
+
+	readonly label: string;
+	readonly tooltip: string;
+	readonly command: string | undefined;
+
+	constructor(workspace: IWorkspace) {
+		let repositoryOwner: string | undefined = undefined;
+		let repositoryName: string | undefined = undefined;
+
+		if (workspace) {
+			let uri: URI | undefined = undefined;
+			if (isFolderToOpen(workspace)) {
+				uri = workspace.folderUri;
+			} else if (isWorkspaceToOpen(workspace)) {
+				uri = workspace.workspaceUri;
+			}
+
+			if (uri?.scheme === 'github' || uri?.scheme === 'codespace') {
+				[repositoryOwner, repositoryName] = uri.authority.split('+');
+			}
+		}
+
+		// Repo
+		if (repositoryName && repositoryOwner) {
+			this.label = localize('playgroundLabelRepository', "$(remote) VS Code Web Playground: {0}/{1}", repositoryOwner, repositoryName);
+			this.tooltip = localize('playgroundRepositoryTooltip', "VS Code Web Playground: {0}/{1}", repositoryOwner, repositoryName);
+		}
+
+		// No Repo
+		else {
+			this.label = localize('playgroundLabel', "$(remote) VS Code Web Playground");
+			this.tooltip = localize('playgroundTooltip', "VS Code Web Playground");
+		}
+	}
+}
+
+(function () {
+
+	// Find config by checking for DOM
+	const configElement = document.getElementById('vscode-workbench-web-configuration');
+	const configElementAttribute = configElement ? configElement.getAttribute('data-settings') : undefined;
+	if (!configElement || !configElementAttribute) {
+		throw new Error('Missing web configuration element');
+	}
+
+	const config: IWorkbenchConstructionOptions & { folderUri?: UriComponents, workspaceUri?: UriComponents } = JSON.parse(configElementAttribute);
+
+	// Revive static extension locations
+	if (Array.isArray(config.staticExtensions)) {
+		config.staticExtensions.forEach(extension => {
+			extension.extensionLocation = URI.revive(extension.extensionLocation);
+		});
+	}
+
+	// Find workspace to open and payload
+	let foundWorkspace = false;
+	let workspace: IWorkspace;
+	let payload = Object.create(null);
+	let logLevel: string | undefined = undefined;
+
+	const query = new URL(document.location.href).searchParams;
+	query.forEach((value, key) => {
+		switch (key) {
+
+			// Folder
+			case WorkspaceProvider.QUERY_PARAM_FOLDER:
+				workspace = { folderUri: URI.parse(value) };
+				foundWorkspace = true;
+				break;
+
+			// Workspace
+			case WorkspaceProvider.QUERY_PARAM_WORKSPACE:
+				workspace = { workspaceUri: URI.parse(value) };
+				foundWorkspace = true;
+				break;
+
+			// Empty
+			case WorkspaceProvider.QUERY_PARAM_EMPTY_WINDOW:
+				workspace = undefined;
+				foundWorkspace = true;
+				break;
+
+			// Payload
+			case WorkspaceProvider.QUERY_PARAM_PAYLOAD:
+				try {
+					payload = JSON.parse(value);
+				} catch (error) {
+					console.error(error); // possible invalid JSON
+				}
+				break;
+
+			// Log level
+			case 'logLevel':
+				logLevel = value;
+				break;
+		}
+	});
+
+	// If no workspace is provided through the URL, check for config attribute from server
+	if (!foundWorkspace) {
+		if (config.folderUri) {
+			workspace = { folderUri: URI.revive(config.folderUri) };
+		} else if (config.workspaceUri) {
+			workspace = { workspaceUri: URI.revive(config.workspaceUri) };
+		} else {
+			workspace = undefined;
+		}
+	}
+
+	// Workspace Provider
+	const workspaceProvider = new WorkspaceProvider(workspace, payload);
+
+	// Home Indicator
+	const homeIndicator: IHomeIndicator = {
+		href: 'https://github.com/microsoft/vscode',
+		icon: 'code',
+		title: localize('home', "Home")
+	};
+
+	// Window indicator (unless connected to a remote)
+	let windowIndicator: WindowIndicator | undefined = undefined;
+	if (!workspaceProvider.hasRemote()) {
+		windowIndicator = new WindowIndicator(workspace);
+	}
+
+	// Product Quality Change Handler
+	const productQualityChangeHandler: IProductQualityChangeHandler = (quality) => {
+		let queryString = `quality=${quality}`;
+
+		// Save all other query params we might have
+		const query = new URL(document.location.href).searchParams;
+		query.forEach((value, key) => {
+			if (key !== 'quality') {
+				queryString += `&${key}=${value}`;
+			}
+		});
+
+		window.location.href = `${window.location.origin}?${queryString}`;
+	};
+
+	// settings sync options
+	const settingsSyncOptions: ISettingsSyncOptions | undefined = config.settingsSyncOptions ? {
+		enabled: config.settingsSyncOptions.enabled,
+		enablementHandler: (enablement) => {
+			let queryString = `settingsSync=${enablement ? 'true' : 'false'}`;
+
+			// Save all other query params we might have
+			const query = new URL(document.location.href).searchParams;
+			query.forEach((value, key) => {
+				if (key !== 'settingsSync') {
+					queryString += `&${key}=${value}`;
+				}
+			});
+
+			window.location.href = `${window.location.origin}?${queryString}`;
+		}
+	} : undefined;
+
+	// Finally create workbench
+	create(document.body, {
+		...config,
+		logLevel: logLevel ? parseLogLevel(logLevel) : undefined,
+		settingsSyncOptions,
+		homeIndicator,
+		windowIndicator,
+		productQualityChangeHandler,
+		workspaceProvider,
+		urlCallbackProvider: new PollingURLCallbackProvider(),
+		credentialsProvider: new LocalStorageCredentialsProvider()
+	});
+})();

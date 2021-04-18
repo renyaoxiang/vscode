@@ -5,9 +5,9 @@
 
 import { Event, Emitter } from 'vs/base/common/event';
 import { timeout } from 'vs/base/common/async';
-import { ILifecycleService } from 'vs/platform/lifecycle/electron-main/lifecycleMain';
+import { ILifecycleMainService } from 'vs/platform/lifecycle/electron-main/lifecycleMainService';
 import { IUpdateService, State, StateType, AvailableForDownload, UpdateType } from 'vs/platform/update/common/update';
-import { IEnvironmentService } from 'vs/platform/environment/common/environment';
+import { IEnvironmentMainService } from 'vs/platform/environment/electron-main/environmentMainService';
 import { ILogService } from 'vs/platform/log/common/log';
 import * as path from 'vs/base/common/path';
 import { realpath, watch } from 'fs';
@@ -17,11 +17,11 @@ import { UpdateNotAvailableClassification } from 'vs/platform/update/electron-ma
 
 abstract class AbstractUpdateService2 implements IUpdateService {
 
-	_serviceBrand: undefined;
+	declare readonly _serviceBrand: undefined;
 
 	private _state: State = State.Uninitialized;
 
-	private _onStateChange = new Emitter<State>();
+	private readonly _onStateChange = new Emitter<State>();
 	readonly onStateChange: Event<State> = this._onStateChange.event;
 
 	get state(): State {
@@ -35,11 +35,11 @@ abstract class AbstractUpdateService2 implements IUpdateService {
 	}
 
 	constructor(
-		@ILifecycleService private readonly lifecycleService: ILifecycleService,
-		@IEnvironmentService environmentService: IEnvironmentService,
+		@ILifecycleMainService private readonly lifecycleMainService: ILifecycleMainService,
+		@IEnvironmentMainService environmentMainService: IEnvironmentMainService,
 		@ILogService protected logService: ILogService,
 	) {
-		if (environmentService.disableUpdates) {
+		if (environmentMainService.disableUpdates) {
 			this.logService.info('update#ctor - updates are disabled');
 			return;
 		}
@@ -106,7 +106,7 @@ abstract class AbstractUpdateService2 implements IUpdateService {
 
 		this.logService.trace('update#quitAndInstall(): before lifecycle quit()');
 
-		this.lifecycleService.quit(true /* from update */).then(vetod => {
+		this.lifecycleMainService.quit(true /* from update */).then(vetod => {
 			this.logService.trace(`update#quitAndInstall(): after lifecycle quit() with veto: ${vetod}`);
 			if (vetod) {
 				return;
@@ -134,17 +134,15 @@ abstract class AbstractUpdateService2 implements IUpdateService {
 
 export class SnapUpdateService extends AbstractUpdateService2 {
 
-	_serviceBrand: undefined;
-
 	constructor(
 		private snap: string,
 		private snapRevision: string,
-		@ILifecycleService lifecycleService: ILifecycleService,
-		@IEnvironmentService environmentService: IEnvironmentService,
+		@ILifecycleMainService lifecycleMainService: ILifecycleMainService,
+		@IEnvironmentMainService environmentMainService: IEnvironmentMainService,
 		@ILogService logService: ILogService,
 		@ITelemetryService private readonly telemetryService: ITelemetryService
 	) {
-		super(lifecycleService, environmentService, logService);
+		super(lifecycleMainService, environmentMainService, logService);
 
 		const watcher = watch(path.dirname(this.snap));
 		const onChange = Event.fromNodeEventEmitter(watcher, 'change', (_, fileName: string) => fileName);
@@ -152,7 +150,7 @@ export class SnapUpdateService extends AbstractUpdateService2 {
 		const onDebouncedCurrentChange = Event.debounce(onCurrentChange, (_, e) => e, 2000);
 		const listener = onDebouncedCurrentChange(this.checkForUpdates, this);
 
-		lifecycleService.onWillShutdown(() => {
+		lifecycleMainService.onWillShutdown(() => {
 			listener.dispose();
 			watcher.close();
 		});
@@ -175,7 +173,7 @@ export class SnapUpdateService extends AbstractUpdateService2 {
 		});
 	}
 
-	protected doQuitAndInstall(): void {
+	protected override doQuitAndInstall(): void {
 		this.logService.trace('update#quitAndInstall(): running raw#quitAndInstall()');
 
 		// Allow 3 seconds for VS Code to close

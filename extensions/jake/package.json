@@ -20,12 +20,16 @@
     "vscode-nls": "^4.0.0"
   },
   "devDependencies": {
-    "@types/node": "^10.14.8"
+    "@types/node": "^12.19.9"
   },
   "main": "./out/main",
   "activationEvents": [
     "onCommand:workbench.action.tasks.runTask"
   ],
+  "workspaceTrust": {
+    "request": "never",
+    "description": "This extension only provides tasks. Trust is already required by the tasks system before any task providers are called."
+  },
   "contributes": {
     "configuration": {
       "id": "jake",
@@ -59,8 +63,13 @@
             "type": "string",
             "description": "%jake.taskDefinition.file.description%"
           }
-        }
+        },
+        "when": "shellExecutionSupported"
       }
     ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/microsoft/vscode.git"
   }
 }

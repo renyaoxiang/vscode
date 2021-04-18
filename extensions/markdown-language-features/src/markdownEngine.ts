@@ -3,20 +3,21 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as crypto from 'crypto';
 import { MarkdownIt, Token } from 'markdown-it';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { MarkdownContributionProvider as MarkdownContributionProvider } from './markdownExtensions';
 import { Slugifier } from './slugify';
 import { SkinnyTextDocument } from './tableOfContentsProvider';
-import { getUriForLinkWithKnownExternalScheme } from './util/links';
+import { hash } from './util/hash';
+import { isOfScheme, MarkdownFileExtensions, Schemes } from './util/links';
 
 const UNICODE_NEWLINE_REGEX = /\u2028|\u2029/g;
 
 interface MarkdownItConfig {
 	readonly breaks: boolean;
 	readonly linkify: boolean;
+	readonly typographer: boolean;
 }
 
 class TokenCache {
@@ -52,6 +53,15 @@ class TokenCache {
 		this.cachedDocument = undefined;
 		this.tokens = undefined;
 	}
+}
+
+export interface RenderOutput {
+	html: string;
+	containingImages: { src: string }[];
+}
+
+interface RenderEnv {
+	containingImages: { src: string }[];
 }
 
 export class MarkdownEngine {
@@ -105,10 +115,10 @@ export class MarkdownEngine {
 
 				this.addImageStabilizer(md);
 				this.addFencedRenderer(md);
-
 				this.addLinkNormalizer(md);
 				this.addLinkValidator(md);
 				this.addNamedHeaders(md);
+				this.addLinkRenderer(md);
 				return md;
 			});
 		}
@@ -129,7 +139,6 @@ export class MarkdownEngine {
 		}
 
 		this.currentDocument = document.uri;
-		this._slugCount = new Map<string, number>();
 
 		const tokens = this.tokenizeString(document.getText(), engine);
 		this._tokenCache.update(document, config, tokens);
@@ -137,20 +146,32 @@ export class MarkdownEngine {
 	}
 
 	private tokenizeString(text: string, engine: MarkdownIt) {
+		this._slugCount = new Map<string, number>();
+
 		return engine.parse(text.replace(UNICODE_NEWLINE_REGEX, ''), {});
 	}
 
-	public async render(input: SkinnyTextDocument | string): Promise<string> {
+	public async render(input: SkinnyTextDocument | string): Promise<RenderOutput> {
 		const config = this.getConfig(typeof input === 'string' ? undefined : input.uri);
 		const engine = await this.getEngine(config);
+
 		const tokens = typeof input === 'string'
 			? this.tokenizeString(input, engine)
 			: this.tokenizeDocument(input, config, engine);
 
-		return engine.renderer.render(tokens, {
+		const env: RenderEnv = {
+			containingImages: []
+		};
+
+		const html = engine.renderer.render(tokens, {
 			...(engine as any).options,
 			...config
-		}, {});
+		}, env);
+
+		return {
+			html,
+			containingImages: env.containingImages
+		};
 	}
 
 	public async parse(document: SkinnyTextDocument): Promise<Token[]> {
@@ -167,7 +188,8 @@ export class MarkdownEngine {
 		const config = vscode.workspace.getConfiguration('markdown', resource);
 		return {
 			breaks: config.get<boolean>('preview.breaks', false),
-			linkify: config.get<boolean>('preview.linkify', true)
+			linkify: config.get<boolean>('preview.linkify', true),
+			typographer: config.get<boolean>('preview.typographer', false)
 		};
 	}
 
@@ -190,15 +212,14 @@ export class MarkdownEngine {
 
 	private addImageStabilizer(md: any): void {
 		const original = md.renderer.rules.image;
-		md.renderer.rules.image = (tokens: any, idx: number, options: any, env: any, self: any) => {
+		md.renderer.rules.image = (tokens: any, idx: number, options: any, env: RenderEnv, self: any) => {
 			const token = tokens[idx];
 			token.attrJoin('class', 'loading');
 
 			const src = token.attrGet('src');
 			if (src) {
-				const hash = crypto.createHash('sha256');
-				hash.update(src);
-				const imgHash = hash.digest('hex');
+				env.containingImages?.push({ src });
+				const imgHash = hash(src);
 				token.attrSet('id', `image-hash-${imgHash}`);
 			}
 
@@ -226,36 +247,47 @@ export class MarkdownEngine {
 		const normalizeLink = md.normalizeLink;
 		md.normalizeLink = (link: string) => {
 			try {
-				const externalSchemeUri = getUriForLinkWithKnownExternalScheme(link);
-				if (externalSchemeUri) {
-					// set true to skip encoding
-					return normalizeLink(externalSchemeUri.toString(true));
+				// Normalize VS Code schemes to target the current version
+				if (isOfScheme(Schemes.vscode, link) || isOfScheme(Schemes['vscode-insiders'], link)) {
+					return normalizeLink(vscode.Uri.parse(link).with({ scheme: vscode.env.uriScheme }).toString());
 				}
 
-				// Assume it must be an relative or absolute file path
-				// Use a fake scheme to avoid parse warnings
-				let uri = vscode.Uri.parse(`vscode-resource:${link}`);
+				// Support file:// links
+				if (isOfScheme(Schemes.file, link)) {
+					// Ensure link is relative by prepending `/` so that it uses the <base> element URI
+					// when resolving the absolute URL
+					return normalizeLink('/' + link.replace(/^file:/, 'file'));
+				}
 
-				if (uri.path) {
-					// Assume it must be a file
-					const fragment = uri.fragment;
+				// If original link doesn't look like a url with a scheme, assume it must be a link to a file in workspace
+				if (!/^[a-z\-]+:/i.test(link)) {
+					// Use a fake scheme for parsing
+					let uri = vscode.Uri.parse('markdown-link:' + link);
+
+					// Relative paths should be resolved correctly inside the preview but we need to
+					// handle absolute paths specially (for images) to resolve them relative to the workspace root
 					if (uri.path[0] === '/') {
 						const root = vscode.workspace.getWorkspaceFolder(this.currentDocument!);
 						if (root) {
-							uri = vscode.Uri.file(path.join(root.uri.fsPath, uri.path));
+							const fileUri = vscode.Uri.joinPath(root.uri, uri.fsPath).with({
+								fragment: uri.fragment,
+								query: uri.query,
+							});
+
+							// Ensure fileUri is relative by prepending `/` so that it uses the <base> element URI
+							// when resolving the absolute URL
+							uri = vscode.Uri.parse('markdown-link:' + '/' + fileUri.toString(true).replace(/^\S+?:/, fileUri.scheme));
 						}
-					} else {
-						uri = vscode.Uri.file(path.join(path.dirname(this.currentDocument!.path), uri.path));
 					}
 
-					if (fragment) {
+					const extname = path.extname(uri.fsPath);
+
+					if (uri.fragment && (extname === '' || MarkdownFileExtensions.includes(extname))) {
 						uri = uri.with({
-							fragment: this.slugifier.fromHeading(fragment).value
+							fragment: this.slugifier.fromHeading(uri.fragment).value
 						});
 					}
-					return normalizeLink(uri.with({ scheme: 'vscode-resource' }).toString(true));
-				} else if (!uri.path && uri.fragment) {
-					return `#${this.slugifier.fromHeading(uri.fragment).value}`;
+					return normalizeLink(uri.toString(true).replace(/^markdown-link:/, ''));
 				}
 			} catch (e) {
 				// noop
@@ -267,8 +299,10 @@ export class MarkdownEngine {
 	private addLinkValidator(md: any): void {
 		const validateLink = md.validateLink;
 		md.validateLink = (link: string) => {
-			// support file:// links
-			return validateLink(link) || link.startsWith('file:') || /^data:image\/.*?;/.test(link);
+			return validateLink(link)
+				|| isOfScheme(Schemes.vscode, link)
+				|| isOfScheme(Schemes['vscode-insiders'], link)
+				|| /^data:image\/.*?;/.test(link);
 		};
 	}
 
@@ -296,6 +330,22 @@ export class MarkdownEngine {
 			}
 		};
 	}
+
+	private addLinkRenderer(md: any): void {
+		const old_render = md.renderer.rules.link_open || ((tokens: any, idx: number, options: any, _env: any, self: any) => {
+			return self.renderToken(tokens, idx, options);
+		});
+
+		md.renderer.rules.link_open = (tokens: any, idx: number, options: any, env: any, self: any) => {
+			const token = tokens[idx];
+			const hrefIndex = token.attrIndex('href');
+			if (hrefIndex >= 0) {
+				const href = token.attrs[hrefIndex][1];
+				token.attrPush(['data-href', href]);
+			}
+			return old_render(tokens, idx, options, env, self);
+		};
+	}
 }
 
 async function getMarkdownOptions(md: () => MarkdownIt) {
@@ -303,16 +353,7 @@ async function getMarkdownOptions(md: () => MarkdownIt) {
 	return {
 		html: true,
 		highlight: (str: string, lang?: string) => {
-			// Workaround for highlight not supporting tsx: https://github.com/isagalaev/highlight.js/issues/1155
-			if (lang && ['tsx', 'typescriptreact'].includes(lang.toLocaleLowerCase())) {
-				lang = 'jsx';
-			}
-			if (lang && lang.toLocaleLowerCase() === 'json5') {
-				lang = 'json';
-			}
-			if (lang && ['c#', 'csharp'].includes(lang.toLocaleLowerCase())) {
-				lang = 'cs';
-			}
+			lang = normalizeHighlightLang(lang);
 			if (lang && hljs.getLanguage(lang)) {
 				try {
 					return `<div>${hljs.highlight(lang, str, true).value}</div>`;
@@ -322,4 +363,24 @@ async function getMarkdownOptions(md: () => MarkdownIt) {
 			return `<code><div>${md().utils.escapeHtml(str)}</div></code>`;
 		}
 	};
+}
+
+function normalizeHighlightLang(lang: string | undefined) {
+	switch (lang && lang.toLowerCase()) {
+		case 'tsx':
+		case 'typescriptreact':
+			// Workaround for highlight not supporting tsx: https://github.com/isagalaev/highlight.js/issues/1155
+			return 'jsx';
+
+		case 'json5':
+		case 'jsonc':
+			return 'json';
+
+		case 'c#':
+		case 'csharp':
+			return 'cs';
+
+		default:
+			return lang;
+	}
 }
